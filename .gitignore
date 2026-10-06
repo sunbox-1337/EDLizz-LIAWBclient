@@ -1,0 +1,46 @@
+# ===== Gradle / 构建产物 =====
+/run/
+/out/
+/logs/
+/build/
+/bin/
+/.settings/
+/.gradle/
+/.kotlin/
+build/
+
+# ===== IDE / 编辑器 =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# ===== 日志 / 崩溃转储（不要提交）=====
+build_log*.txt
+build_full.txt
+hs_err_pid*.log
+replay_pid*.log
+*.log
+
+# ===== 其它客户端源码 / 第三方压缩包（按需保留，想一起公开就删掉对应行）=====
+ClientBase-master/
+FDPClient-main/
+Lizz-1.8.9/
+moonlight/
+newclient/
+Rise-6.9.5-main/
+Southside-sell-source-main/
+MoonLight-main (1).zip
+
+# ===== 备份 / 临时文件夹 =====
+_clickgui_backup/
+zip_include/
+.deep-copilot/
+背包ui错误报告/
+背包ui错误报告.zip
+origin
+
+# ===== 打包产物 =====
+OpenMyau-Fix-1.4.jar
+*.zip

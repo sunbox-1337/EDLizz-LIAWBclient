@@ -1,0 +1,19 @@
+--- screenshots ---
+e2e_layer.png  107971
+e2e_overlay.png  2819702
+e2e_test.png  1470861
+final_overlay.png  3489483
+flicker_check.png  119551
+overlay_e2e_final.png  2249526
+overlay_e2e_layer.png  70583
+pipeline_test.png  492265
+(count) 9
+--- md names ---
+mc_???.md
+???????.md
+???.md
+--- models ---
+face_detection_yunet_2023mar.onnx  0.2MB
+haarcascade_frontalface_default.xml  0.9MB
+yolov8n.pt  6.2MB
+--- available capture libs ---

@@ -1,0 +1,16 @@
+[
+  {
+    "modid": "Lizz",
+    "name": "LAWIB",
+    "description": "Minecraft1.8.9基于-lizz的黑客客户端-LIAWB。",
+    "version": "${version}",
+    "mcversion": "1.8.9",
+    "url": "https://liquidbounce.net",
+    "updateUrl": "",
+    "authorList": ["CCBlueX","PickBowen","bzym2","RainRuin","sunbox"],
+    "credits": "",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": []
+  }
+]
