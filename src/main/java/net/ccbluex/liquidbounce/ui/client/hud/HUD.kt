@@ -46,7 +46,8 @@ object HUD : MinecraftInstance {
         Taco::class.java,
         Keystrokes::class.java,
         Target2::class.java,
-        PotionEffects::class.java
+        PotionEffects::class.java,
+        MusicPlayerElement::class.java
     )
 
     val ELEMENTS = ALL_ELEMENT_CLASSES.associateWithTo(IdentityHashMap(ALL_ELEMENT_CLASSES.size)) {

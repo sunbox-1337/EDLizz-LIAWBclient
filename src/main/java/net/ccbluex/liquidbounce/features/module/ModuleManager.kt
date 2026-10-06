@@ -297,7 +297,8 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
             LagRange,
             Gapple2,
             Playtime,
-            Hub
+            Hub,
+            MusicPlayer
         )
 
         registerModules(modules = modules)

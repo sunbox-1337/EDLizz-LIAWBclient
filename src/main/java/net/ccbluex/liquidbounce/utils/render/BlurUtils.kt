@@ -35,7 +35,8 @@ object BlurUtils {
     fun drawOffsetBlur(
         x: Float, y: Float, w: Float, h: Float,
         samples: Int, strength: Float, radius: Float = 0f,
-        rects: List<FloatArray>? = null
+        rects: List<FloatArray>? = null,
+        liquidGlass: Boolean = true
     ) {
         maskRects = rects
         try {
@@ -52,7 +53,7 @@ object BlurUtils {
             }
 
             // 液态玻璃：独立开关，复用上面同一个 x/y/w/h/radius（定位与圆角都由组件经此处传入）。
-            if (BlurSettings.liquidGlass) {
+            if (BlurSettings.liquidGlass && liquidGlass) {
                 LiquidGlassUtils.draw(x, y, w, h, radius)
             }
         } finally {

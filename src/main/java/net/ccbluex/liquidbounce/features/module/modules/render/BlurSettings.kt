@@ -133,6 +133,9 @@ object BlurSettings : Module("BlurSettings", Category.RENDER) {
     // 由 BlurUtils 转交给 LiquidGlassUtils（复用组件已有的定位/圆角）。
     val liquidGlass by boolean("LiquidGlass", false)
 
+    /** ArrayList 是否单独套用液态玻璃效果（可独立于全局 LiquidGlass 关闭）。 */
+    val arraylistLiquidGlass by boolean("ArraylistLiquidGlass", true) { liquidGlass }
+
     /** 组件的模糊调用点是否需要触发后处理（模糊或玻璃任一开启）。 */
     val active: Boolean
         get() = enabled || liquidGlass

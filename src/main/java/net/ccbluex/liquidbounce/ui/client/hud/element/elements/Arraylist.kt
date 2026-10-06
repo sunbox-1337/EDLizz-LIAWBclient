@@ -474,7 +474,8 @@ class Arraylist(
                         screenX, screenY, screenW, screenH,
                         samples = BlurSettings.passes,
                         strength = 0f,
-                        radius = roundedBackgroundRadius * elementScale * screenScale
+                        radius = roundedBackgroundRadius * elementScale * screenScale,
+                        liquidGlass = BlurSettings.arraylistLiquidGlass
                     )
                 }
             }
@@ -502,7 +503,8 @@ class Arraylist(
                         screenX, screenY, screenW, screenH,
                         samples = BlurSettings.passes,
                         strength = 0f,
-                        radius = globalBgRadius * elementScale * screenScale
+                        radius = globalBgRadius * elementScale * screenScale,
+                        liquidGlass = BlurSettings.arraylistLiquidGlass
                     )
                 }
 
