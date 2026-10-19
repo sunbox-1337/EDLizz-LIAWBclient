@@ -47,7 +47,6 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
         // Register modules
         val modules = arrayOf(
             AbortBreaking,
-            ArmorBreaker,
             Aimbot,
             HypixelAimbot,
             Ambience,
@@ -106,6 +105,7 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
             ComponentOnHover,
             ConsoleSpammer,
             Criticals,
+            GrimCritical,
             Damage,
             Derp,
             ESP,
@@ -177,6 +177,7 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
             KillSay,
             Entityspeed,
             GrimFly,
+            Grim,
             Stuck,
             SaveArmor,
             MoreDamage,
@@ -255,6 +256,7 @@ object ModuleManager : Listenable, Collection<Module> by MODULE_REGISTRY {
             NoC03,
             Entityspeed,
             ArmorBreak,
+            JKLArBreak,
             Bloxdmove,
             Stealer,
             TargetMark,

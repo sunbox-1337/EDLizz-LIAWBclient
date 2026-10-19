@@ -7,6 +7,7 @@ import net.ccbluex.liquidbounce.features.module.Category
 import net.ccbluex.liquidbounce.file.FileManager
 import net.ccbluex.liquidbounce.utils.attack.EntityUtils.Targets
 import net.ccbluex.liquidbounce.utils.client.chat
+import net.ccbluex.liquidbounce.utils.client.ClientUtils.LOGGER
 import net.ccbluex.liquidbounce.utils.io.HttpClient
 import net.ccbluex.liquidbounce.utils.io.get
 import net.ccbluex.liquidbounce.utils.kotlin.StringUtils
@@ -18,6 +19,14 @@ import kotlin.reflect.KMutableProperty0
  * Utility class for handling settings and scripts in LiquidBounce.
  */
 object SettingsUtils {
+
+    /**
+     * Counters of the currently applied script, used to report the result back to the user.
+     * Silent failures are the reason why people think their settings "aren't saved".
+     */
+    private var appliedCount = 0
+    private var failedCount = 0
+    private val failedEntries = ArrayList<String>()
 
     fun loadFromUrl(url: String) = if (url.startsWith("http")) {
         HttpClient.get(url).use {
@@ -36,6 +45,10 @@ object SettingsUtils {
      * @param script The script to apply.
      */
     fun applyScript(script: String) {
+        appliedCount = 0
+        failedCount = 0
+        failedEntries.clear()
+
         script.lineSequence().forEachIndexed { index, s ->
             if (s.isEmpty() || s.startsWith('#')) {
                 return@forEachIndexed
@@ -94,11 +107,14 @@ object SettingsUtils {
 
                     val moduleName = args[0]
                     val valueName = args[1]
-                    val value = args[2]
+                    // Value may contain spaces (e.g. font names) — rejoin everything after the value name
+                    val value = StringUtils.toCompleteString(args, 2)
                     val module = moduleManager[moduleName]
 
                     if (module == null) {
                         chat("§7[§3§lAutoSettings§7] §cModule §a§l$moduleName§c does not exist!")
+                        failedCount++
+                        failedEntries.add("$moduleName (module missing)")
                         return@forEachIndexed
                     }
 
@@ -110,6 +126,16 @@ object SettingsUtils {
                 }
             }
         }
+
+        // Report what actually made it into the client instead of failing silently
+        if (failedCount > 0) {
+            chat("§7[§3§lAutoSettings§7] §c$failedCount §7entries failed: " +
+                    failedEntries.take(5).joinToString(", ") { "§c$it§7" } +
+                    if (failedEntries.size > 5) " §7and ${failedEntries.size - 5} more" else "")
+            LOGGER.error("[SettingsUtils] Failed entries: ${failedEntries.joinToString(" | ")}")
+        }
+        LOGGER.info("[SettingsUtils] Applied $appliedCount entries, $failedCount failed.")
+        chat("§7[§3§lAutoSettings§7] §a$appliedCount §7entries applied§7, §c$failedCount §cfailed§7.")
 
         // Ensure values.json saved after applying script (keeps JSON consistent)
         FileManager.saveConfig(FileManager.valuesConfig)
@@ -124,6 +150,7 @@ object SettingsUtils {
     // Utility functions for setting toggles
     private fun setToggle(module: Module, value: String) {
         module.state = value.toBoolean()
+        appliedCount++
         chat("§7[§3§lAutoSettings§7] §a§l${module.getName()} §7was toggled §c§l${if (module.state) "on" else "off"}§7.")
     }
 
@@ -131,6 +158,7 @@ object SettingsUtils {
     private fun setBind(module: Module, value: String) {
         // value is the key name (e.g. "R"), convert to index
         module.keyBind = Keyboard.getKeyIndex(value)
+        appliedCount++
         chat(
             "§7[§3§lAutoSettings§7] §a§l${module.getName()} §7was bound to §c§l${
                 Keyboard.getKeyName(
@@ -150,9 +178,22 @@ object SettingsUtils {
         }
 
         try {
+            val before = moduleValue.toText()
             moduleValue.fromText(value)
-            chat("§7[§3§lAutoSettings§7] §a§l${module.getName()}§7 value §8§l${moduleValue.name}§7 set to §c§l$value§7.")
+            val after = moduleValue.toText()
+
+            if (before == after && after != value) {
+                // Parser rejected the text silently -> report it instead of claiming success
+                failedCount++
+                failedEntries.add("${module.getName()}.${moduleValue.name}")
+                chat("§7[§3§lAutoSettings§7] §cValue §a§l${moduleValue.name}§c in §a§l${module.getName()}§c could not parse '§e$value§c' (stayed §7$after§c).")
+            } else {
+                appliedCount++
+                chat("§7[§3§lAutoSettings§7] §a§l${module.getName()}§7 value §8§l${moduleValue.name}§7 set to §c§l$after§7.")
+            }
         } catch (e: Exception) {
+            failedCount++
+            failedEntries.add("${module.getName()}.${moduleValue.name}")
             chat("§7[§3§lAutoSettings§7] §a§l${e.javaClass.name}§7(${e.message}) §cAn Exception occurred while setting §a§l$value§c to §a§l${moduleValue.name}§c in §a§l${module.getName()}§c.")
         }
     }
@@ -177,8 +218,13 @@ object SettingsUtils {
 
                 if (values) {
                     for (value in module.values) {
-                        val valueString = "${module.name} ${value.name} ${value.toText()}"
-                        if (valueString.isNotBlank()) {
+                        // Fault tolerant: a single bad value must not abort the whole save
+                        val valueString = runCatching { "${module.name} ${value.name} ${value.toText()}" }
+                            .onFailure {
+                                LOGGER.error("[SettingsUtils] Failed to serialize ${module.name}.${value.name}, skipped.", it)
+                            }
+                            .getOrNull()
+                        if (valueString != null && valueString.isNotBlank()) {
                             appendLine(valueString)
                         }
                     }

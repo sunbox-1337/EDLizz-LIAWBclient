@@ -8,7 +8,7 @@ import net.ccbluex.liquidbounce.ui.client.hud.element.ElementInfo
 import net.ccbluex.liquidbounce.ui.font.Fonts
 import net.ccbluex.liquidbounce.utils.render.BlurUtils
 import net.ccbluex.liquidbounce.utils.render.CustomTexture
-import net.ccbluex.liquidbounce.utils.render.GlowUtils
+import net.ccbluex.liquidbounce.utils.GlowUtils
 import net.ccbluex.liquidbounce.utils.render.RenderUtils.drawRoundedRect
 import net.ccbluex.liquidbounce.utils.render.RenderUtils.drawTexture
 import net.ccbluex.liquidbounce.utils.render.music.MusicTrack

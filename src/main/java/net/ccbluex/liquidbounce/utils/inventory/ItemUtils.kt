@@ -20,6 +20,11 @@ import kotlin.math.roundToInt
 
 object ItemUtils : MinecraftInstance {
     /**
+     * NekoBounce ArmorBreak 依赖的攻击力计算（等价于 attackDamage 扩展）
+     */
+    fun getAttackDamage(stack: ItemStack): Double = stack.attackDamage
+
+    /**
      * Allows you to create an item using the item json
      *
      * @param itemArguments arguments of item

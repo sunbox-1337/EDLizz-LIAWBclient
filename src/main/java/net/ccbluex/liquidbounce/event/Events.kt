@@ -22,6 +22,13 @@ import net.minecraft.util.*
 class AttackEvent(val targetEntity: Entity?) : Event()
 
 /**
+ * Called right before the attack is processed (at HEAD of PlayerControllerMP.attackEntity)
+ *
+ * @param targetEntity Attacked entity
+ */
+class PreAttackEvent(val targetEntity: Entity?) : Event()
+
+/**
  * Called when minecraft get bounding box of block
  *
  * @param blockPos block position of block
@@ -254,6 +261,7 @@ internal val ALL_EVENT_CLASSES = arrayOf(
     StrafeEvent::class.java,
     ScreenEvent::class.java,
     AttackEvent::class.java,
+    PreAttackEvent::class.java,
     BlockPushEvent::class.java,
     Render3DEvent::class.java,
     MotionEvent::class.java,

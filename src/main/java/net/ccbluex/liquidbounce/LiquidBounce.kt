@@ -81,7 +81,7 @@ object LiquidBounce {
     const val CLIENT_GITHUB = "https://github.com/CCBlueX/LiquidBounce"
     const val MINECRAFT_VERSION = "1.8.9"
 
-    val clientVersionText = "b9.4"
+    val clientVersionText = "b12.7"
     val clientVersionNumber = clientVersionText.substring(1).toIntOrNull() ?: 0
     val clientCommit = gitInfo["git.commit.id.abbrev"]?.let { "git-$it" } ?: "unknown"
     val clientBranch = gitInfo["git.branch"]?.toString() ?: "unknown"
@@ -118,9 +118,11 @@ object LiquidBounce {
                 loadActiveGenerators()
                 loadSrg()
                 LOGGER.info("Preload tasks of $CLIENT_NAME are completed!")
-                future.complete(Unit)
             } catch (e: Exception) {
-                future.completeExceptionally(e)
+                // Never fail startup: preload problems (e.g. offline SRG download) must not crash the game
+                LOGGER.error("Preload task failed, continuing startup.", e)
+            } finally {
+                future.complete(Unit)
             }
         }
         return future

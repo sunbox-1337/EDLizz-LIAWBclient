@@ -203,6 +203,10 @@ reobf {
 jar.dependsOn("shadowJar")
 
 tasks.reobfShadowJar.mustRunAfter shadowJar
+// 关键修复：不跑 reobfShadowJar 的话，build/libs 里的 jar 全是 MCP 名（currentScreen 等），
+// 在混淆（SRG）运行环境下 mixin @Shadow 解析失败直接崩溃。
+// finalizedBy 保证每次 shadowJar 之后必然执行 reobf。
+shadowJar.finalizedBy tasks.reobfShadowJar
 
 task copyZipInclude(type: Copy) {
     from 'zip_include/'

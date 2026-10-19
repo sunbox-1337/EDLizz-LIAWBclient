@@ -36,6 +36,8 @@ object MusicPlayer : Module("MusicPlayer", Category.RENDER) {
     private val openFolder by boolean("OpenFolder", false)
     // 重新扫描音乐列表
     private val reloadList by boolean("Reload", false)
+    private var openFolderLatch = false
+    private var reloadListLatch = false
 
     @Volatile var tracks: List<MusicTrack> = emptyList()
         private set
@@ -155,13 +157,14 @@ object MusicPlayer : Module("MusicPlayer", Category.RENDER) {
 
         Mp3AudioPlayer.setVolume(volume)
 
-        if (openFolder) {
-            openFolder = false
+        // 设置委托是 val，不能直接复位；改成边沿触发：开关由关变开时执行一次
+        if (openFolder && !openFolderLatch) {
             openMusicFolder()
         }
-        if (reloadList) {
-            reloadList = false
+        openFolderLatch = openFolder
+        if (reloadList && !reloadListLatch) {
             reload(autoplay = Mp3AudioPlayer.isActive.not())
         }
+        reloadListLatch = reloadList
     }
 }

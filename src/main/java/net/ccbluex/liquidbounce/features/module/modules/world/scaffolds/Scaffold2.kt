@@ -171,9 +171,13 @@ object Scaffold2 : Module("Scaffold2", Category.WORLD) {
 
     // Rotation Options
     private val modeList =
-        choices("Rotations", arrayOf("Off", "Normal", "Stabilized", "ReverseYaw", "GodBridge", "Hypixel"), "Normal")
+        choices("Rotations", arrayOf("Off", "Normal", "Stabilized", "ReverseYaw", "GodBridge", "Hypixel", "UnfairPitch"), "Normal")
     private val hypixelMinPitch by float("HypixelMinPitch", 55f, 50f..90f) { modeList.get() == "Hypixel" }
     private val hypixelMaxPitch by float("HypixelMaxPitch", 75f, 50f..90f) { modeList.get() == "Hypixel" }
+    // Unfair Pitch（MoonLight 非法超大俯仰）：yaw 保持玩家朝向，pitch 越过 90°「超低头」
+    private val unfairPitch by float("UnfairPitch", 93f, 90.5f..135f) { modeList.get() == "UnfairPitch" }
+    // Telly 不回头：跳过水平贴墙放置，改用超低头直接放脚下/身后
+    private val tellyUnfairPitch by boolean("TellyUnfairPitch", false) { scaffoldMode == "Telly" }
     private val options = RotationSettingsWithRotationModes(this, modeList).apply {
         strictValue.excludeWithState()
         resetTicksValue.setSupport { it && scaffoldMode != "Telly" }
@@ -299,7 +303,11 @@ object Scaffold2 : Module("Scaffold2", Category.WORLD) {
     private var horizontalPlacements = horizontalPlacementsRange.random()
     private var verticalPlacements = verticalPlacementsRange.random()
     private val shouldPlaceHorizontally
-        get() = scaffoldMode == "Telly" && mc.thePlayer.isMoving && (startHorizontally && blocksUntilAxisChange <= horizontalPlacements || !startHorizontally && blocksUntilAxisChange > verticalPlacements)
+        get() = scaffoldMode == "Telly" && !tellyUnfairPitch && mc.thePlayer.isMoving && (startHorizontally && blocksUntilAxisChange <= horizontalPlacements || !startHorizontally && blocksUntilAxisChange > verticalPlacements)
+
+    /** Unfair Pitch 生效条件：旋转模式选了 UnfairPitch，或 Telly 开了不回头（超低头放置）。 */
+    private val useUnfairPitchRotation
+        get() = options.rotationsActive && (modeList.get() == "UnfairPitch" || scaffoldMode == "Telly" && tellyUnfairPitch)
 
     // <--
 
@@ -716,7 +724,7 @@ object Scaffold2 : Module("Scaffold2", Category.WORLD) {
             }
         }
 
-        setTargetRotation(rotation, options, ticks)
+        setTargetRotation(rotation, options, ticks, allowIllegalPitch = useUnfairPitchRotation)
     }
 
     // Search for new target block
@@ -1110,11 +1118,14 @@ object Scaffold2 : Module("Scaffold2", Category.WORLD) {
         val roundYaw90 = round(rotation.yaw / 90f) * 90f
         val roundYaw45 = round(rotation.yaw / 45f) * 45f
 
-        rotation = when (options.rotationMode) {
+        rotation = (if (useUnfairPitchRotation) {
+            // MoonLight Unfair Pitch：yaw 保持玩家朝向（不回头），pitch 越过 90° 超低头
+            Rotation(mc.thePlayer.rotationYaw, unfairPitch)
+        } else when (options.rotationMode) {
             "Stabilized" -> Rotation(roundYaw45, rotation.pitch)
             "ReverseYaw" -> Rotation(if (!isLookingDiagonally) roundYaw90 else roundYaw45, rotation.pitch)
             else -> rotation
-        }.fixedSensitivity()
+        }).fixedSensitivity()
 
         // If the current rotation already looks at the target block and side, then return right here
         performBlockRaytrace(currRotation, maxReach)?.let { raytrace ->

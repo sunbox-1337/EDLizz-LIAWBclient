@@ -73,10 +73,30 @@ class Panel(
     val scrollbar
         get() = elements.size > maxElements
 
+    /**
+     * 只修「彻底丢出屏幕」的离谱坐标（例如被中键拖滚一路推到几千像素外）。
+     * 正常滚动可以随意把面板推到负坐标，这里不做限制，否则滚轮会像被卡住。
+     */
+    fun repairPosition() {
+        val resolution = ScaledResolution(mc)
+        val maxX = (resolution.scaledWidth / scale).roundToInt()
+        val maxY = (resolution.scaledHeight / scale).roundToInt()
+
+        if (x < -maxX * 4 || x > maxX * 4) x = 100
+        if (y < -maxY * 4 || y > maxY * 4) y = 5
+    }
+
     var isVisible = true
+
+    /**
+     * 固定内容高度。设置列这种「容器型面板」没有 element，
+     * 靠它把面板撑到指定高度，否则 fade 会停在 0。
+     */
+    var minBodyHeight = 0
+
     var fade = 0
         set(value) {
-            val parsed = value.clamp(0, elementsHeight)
+            val parsed = value.clamp(0, maxOf(elementsHeight, minBodyHeight))
 
             if (parsed != field) {
                 // Update panel pos not to extend beyond border.
@@ -184,7 +204,7 @@ class Panel(
     }
 
     fun updateFade(delta: Int) {
-        val target = if (open) elementsHeight else 0
+        val target = if (open) maxOf(elementsHeight, minBodyHeight) else 0
         val remaining = target - fade
 
         // 已经很接近就直接吸附到目标位置

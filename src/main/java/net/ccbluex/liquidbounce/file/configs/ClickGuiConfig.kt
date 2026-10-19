@@ -39,6 +39,9 @@ class ClickGuiConfig(file: File) : FileConfig(file) {
                 panel.x = panelObject["posX"].asInt
                 panel.y = panelObject["posY"].asInt
 
+                // 旧配置可能把面板滚到了屏幕外（y≈-1000），不修就会「打开什么都没有」
+                panel.repairPosition()
+
                 for (element in panel.elements) {
                     if (element !is ModuleElement) continue
                     if (!panelObject.has(element.module.name)) continue

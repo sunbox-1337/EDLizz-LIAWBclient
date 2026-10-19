@@ -20,6 +20,7 @@ import net.ccbluex.liquidbounce.file.configs.models.ClientConfiguration
 import net.ccbluex.liquidbounce.ui.client.GuiMainMenu
 import net.ccbluex.liquidbounce.ui.client.altmanager.menus.altgenerator.GuiTheAltening.Companion.apiKey
 import net.ccbluex.liquidbounce.utils.attack.EntityUtils.Targets
+import net.ccbluex.liquidbounce.utils.client.ClientUtils.LOGGER
 import net.ccbluex.liquidbounce.utils.io.readJson
 import java.io.*
 
@@ -143,7 +144,20 @@ class ValuesConfig(file: File) : FileConfig(file) {
             if (module.values.isEmpty()) continue
 
             val jsonModule = JsonObject()
-            for (value in module.values) jsonModule.add(value.name, value.toJson())
+            for (value in module.values) {
+                // Fault tolerant: one broken value must not throw away every other module's config
+                runCatching { value.toJson() }
+                    .onFailure {
+                        LOGGER.error("[ValuesConfig] Failed to serialize ${module.name}.${value.name}, skipped.", it)
+                    }
+                    .getOrNull()
+                    ?.let { element ->
+                        if (jsonModule.has(value.name)) {
+                            LOGGER.warn("[ValuesConfig] Duplicate value name '${value.name}' in ${module.name}, overwriting.")
+                        }
+                        jsonModule.add(value.name, element)
+                    }
+            }
             jsonObject.add(module.name, jsonModule)
         }
 

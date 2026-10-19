@@ -36,7 +36,8 @@ object Speed : Module("Speed", Category.MOVEMENT) {
         TeleportCubeCraft, HypixelHop, HypixelLowHop, BlocksMCHop,
         Boost, Frame, MiJump, OnGround, SlowHop, Legit, CustomSpeed,
         PredictionTimer, PredictionTimer2, FastLowHop,
-        GrimACSpeed, Grim2Speed   // Grim 模式
+        GrimACSpeed, Grim2Speed,   // Grim 模式
+        TargetBoost                // MoonLight EntityCollide 目标加速
     )
 
     private val deprecatedMode = arrayOf(
@@ -134,6 +135,32 @@ object Speed : Module("Speed", Category.MOVEMENT) {
     val fastLowHopGroundSpeed by float("FastLowHopGroundSpeed", 1.6f, 1f..2.5f) { mode.get() == "FastLowHop" }
     val fastLowHopTimer by float("FastLowHopTimer", 1.2f, 1f..1.5f) { mode.get() == "FastLowHop" }
 
+    // TargetBoost（MoonLight EntityCollide 目标加速）选项
+    val targetBoostExpand by boolean("TargetBoostExpand", false) { mode.get() == "TargetBoost" }
+    val targetBoostStrength by float("TargetBoostStrength", 0.078f, 0.01f..0.2f) { mode.get() == "TargetBoost" }
+
+    // 合法疾跑（TargetBoost/GrimAC/Grim2）：只有纯前进方向才疾跑，
+    // 左右平移 / 后退移动时不疾跑（Grim 会检测斜向、后退疾跑）
+    private val legalSprintModes = arrayOf("TargetBoost", "GrimAC", "Grim2")
+    val legalSprint by boolean("LegalSprint", false) { mode.get() in legalSprintModes }
+
+    /**
+     * 合法疾跑逻辑：
+     *  - LegalSprint 开启且当前模式支持 → 只有按住前进（W）且无 A/D/S 输入时疾跑，其余方向强制取消疾跑
+     *  - 否则保持原逻辑：移动就疾跑
+     */
+    private fun applySprint(thePlayer: net.minecraft.client.entity.EntityPlayerSP) {
+        if (sprintManually) return
+
+        if (legalSprint && mode.get() in legalSprintModes) {
+            val input = thePlayer.movementInput
+            val forwardOnly = input.moveForward > 0f && input.moveStrafe == 0f
+            thePlayer.isSprinting = thePlayer.isMoving && forwardOnly
+        } else if (thePlayer.isMoving) {
+            thePlayer.isSprinting = true
+        }
+    }
+
     /**
      * 更新静默瞄准目标的角度
      */
@@ -168,8 +195,7 @@ object Speed : Module("Speed", Category.MOVEMENT) {
         if (notOnScaffold && isOnScaffold)
             return@handler
 
-        if (thePlayer.isMoving && !sprintManually)
-            thePlayer.isSprinting = true
+        applySprint(thePlayer)
 
         // 同步 FastLowHop 参数
         if (mode.get() == "FastLowHop") {
@@ -191,8 +217,7 @@ object Speed : Module("Speed", Category.MOVEMENT) {
         if (notOnScaffold && isOnScaffold)
             return@handler
 
-        if (thePlayer.isMoving && !sprintManually)
-            thePlayer.isSprinting = true
+        applySprint(thePlayer)
 
         // 调用无参的 onMotion
         modeModule.onMotion()
@@ -207,6 +232,9 @@ object Speed : Module("Speed", Category.MOVEMENT) {
 
         if (notOnScaffold && isOnScaffold)
             return@handler
+
+        // 原版 onLivingUpdate 之后再次强制纠正（原版会因 moveForward>=0.8 把斜走疾跑开回来）
+        mc.thePlayer?.let { applySprint(it) }
 
         modeModule.onPostMotion()
     }
@@ -265,6 +293,9 @@ object Speed : Module("Speed", Category.MOVEMENT) {
 
         if (notOnScaffold && isOnScaffold)
             return@handler
+
+        // 移动方向已确定时再纠正一次：斜走（W+A/D）不允许疾跑
+        mc.thePlayer?.let { applySprint(it) }
 
         modeModule.onStrafe()
     }

@@ -40,6 +40,13 @@ import net.minecraft.crash.CrashReportCategory;
 import net.minecraft.entity.Entity;
 import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemSword;
+import net.minecraft.item.ItemFood;
+import net.minecraft.item.ItemPotion;
+import net.minecraft.item.ItemBucketMilk;
+import net.minecraft.item.ItemStack;
+import net.ccbluex.liquidbounce.utils.client.ViaUseItem;
+import com.viaversion.viaversion.api.protocol.version.ProtocolVersion;
+import de.florianmichael.vialoadingbase.ViaLoadingBase;
 import net.minecraft.network.play.client.C03PacketPlayer;
 import net.minecraft.network.play.client.C0APacketAnimation;
 import net.minecraft.network.play.client.C0BPacketEntityAction;
@@ -843,5 +850,21 @@ public abstract class MixinEntityPlayerSP extends MixinAbstractClientPlayer {
     private void postTickEvent(CallbackInfo ci) {
         final PlayerTickEvent tickEvent = new PlayerTickEvent(EventState.POST);
         EventManager.INSTANCE.call(tickEvent);
+
+        // ---- 跨版本吃食物保活（MoonLight 手法）----
+        // 1.8 客户端只发一次 C08 就等服务器驱动进食；但跨 1.9+ 协议（ViaForge 跨 1.9/1.12.2
+        // 再进 1.8 服）时，客户端本地进食计时器还在走，服务端侧却可能因协议转换丢掉
+        // 「持续使用物品」的状态 → 金苹果/药水吃到一半被打断、吃不完。
+        // 这里在「正在使用物品 + 手持可食用物」时，每个 tick 通过 Via 管线补发一个
+        // 1.9 的 Use Item，让服务端始终认为你在持续进食，恢复跨版本正常吃。
+        if (net.ccbluex.liquidbounce.features.module.modules.player.Gapple.INSTANCE.isViaKeepAlive()
+                && ViaUseItem.isCrossVersionTo9Plus() && isUsingItem()) {
+            final ItemStack held = getHeldItem();
+            if (held != null && (held.getItem() instanceof ItemFood
+                    || held.getItem() instanceof ItemPotion
+                    || held.getItem() instanceof ItemBucketMilk)) {
+                ViaUseItem.sendUseItem();
+            }
+        }
     }
 }

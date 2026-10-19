@@ -35,6 +35,8 @@ import net.minecraft.util.ResourceLocation
 import net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting
 import net.minecraft.client.renderer.RenderHelper.enableGUIStandardItemLighting
 import net.minecraft.entity.Entity
+import net.minecraft.item.ItemStack
+import net.minecraft.potion.Potion
 import net.ccbluex.liquidbounce.utils.render.BlurUtils
 import net.ccbluex.liquidbounce.features.module.modules.render.BlurSettings
 
@@ -44,7 +46,7 @@ object TargetHUD : Module("TargetHUD", Category.RENDER) {
         "Style",
         arrayOf(
             "Lizz", "Novoline", "Compact", "Rise", "Southside",
-            "Styles", "戶籍", "Myau", "Naven", "Exhibition", "Opai", "RiseModern"
+            "Styles", "戶籍", "Myau", "Naven", "Exhibition", "Opai", "RiseModern", "Liawb"
         ),
         "RiseModern"
     )
@@ -108,6 +110,36 @@ object TargetHUD : Module("TargetHUD", Category.RENDER) {
     private val opaiShadowCheck by boolean("Opai-ShadowCheck", false) { hudStyle == "Opai" }
     private val opaiShadowStrengh by float("Opai-shadowStrengh", 0.5f, 0.0f..1.0f) { hudStyle == "Opai" && opaiShadowCheck }
     private val opaiVanishDelay by int("Opai-VanishDelay", 300, 0..500) { hudStyle == "Opai" }
+
+    // ================= Liawb 模式设置 =================
+    private val liawbRadius by float("Liawb-Radius", 8f, 0f..20f) { hudStyle == "Liawb" }
+    private val liawbBackgroundColor by color("Liawb-BG", Color(20, 20, 25, 180)) { hudStyle == "Liawb" }
+    private val liawbTextColor by color("Liawb-TextColor", Color.WHITE) { hudStyle == "Liawb" }
+    private val liawbRingRadius by float("Liawb-RingRadius", 15f, 8f..28f) { hudStyle == "Liawb" }
+    private val liawbRingThickness by float("Liawb-RingThickness", 4f, 2f..8f) { hudStyle == "Liawb" }
+    private val liawbRingColor by color("Liawb-RingActive", Color(80, 255, 120)) { hudStyle == "Liawb" }
+    private val liawbRingBackColor by color("Liawb-RingInactive", Color(60, 60, 70, 200)) { hudStyle == "Liawb" }
+    private val liawbNameFont by font("Liawb-NameFont", Fonts.fontSemibold40) { hudStyle == "Liawb" }
+    private val liawbInfoFont by font("Liawb-InfoFont", Fonts.fontSemibold35) { hudStyle == "Liawb" }
+    private val liawbShowMainHand by boolean("Liawb-MainHand", true) { hudStyle == "Liawb" }
+    private val liawbShowArmor by boolean("Liawb-Armor", true) { hudStyle == "Liawb" }
+    private val liawbArmorNumbers by boolean("Liawb-ArmorNumbers", true) { hudStyle == "Liawb" && liawbShowArmor }
+    private val liawbArmorRing by boolean("Liawb-ArmorTotalRing", true) { hudStyle == "Liawb" && liawbShowArmor }
+    private val liawbArmorRingColor by color("Liawb-ArmorRingActive", Color(120, 180, 255)) { hudStyle == "Liawb" && liawbShowArmor && liawbArmorRing }
+    private val liawbArmorRingBackColor by color("Liawb-ArmorRingInactive", Color(60, 60, 70, 200)) { hudStyle == "Liawb" && liawbShowArmor && liawbArmorRing }
+    private val liawbShowPotions by boolean("Liawb-Potions", true) { hudStyle == "Liawb" }
+    private val liawbShadowCheck by boolean("Liawb-Shadow", true) { hudStyle == "Liawb" }
+    private val liawbShadowStrength by float("Liawb-ShadowStrength", 0.5f, 0f..2f) { hudStyle == "Liawb" && liawbShadowCheck }
+    private val liawbShadowColor by color("Liawb-ShadowColor", Color(0, 0, 0, 120)) { hudStyle == "Liawb" && liawbShadowCheck }
+    private val liawbShadowMask by boolean("Liawb-ShadowMask", true) { hudStyle == "Liawb" && liawbShadowCheck }
+    // 出现/消失弹性动画：Bounce = 透明淡入 + 从小到大 → 略小 → 过冲 → 回落；消失反向
+    private val liawbAnimMode by choices("Liawb-Animation", arrayOf("Bounce", "None"), "Bounce") { hudStyle == "Liawb" }
+    // HUD 整体大小
+    private val liawbUiScale by float("Liawb-UIScale", 1f, 0.6f..1.6f) { hudStyle == "Liawb" }
+    // 名字顶部底条（可选 + 可选颜色）
+    private val liawbNameBar by boolean("Liawb-NameBar", false) { hudStyle == "Liawb" }
+    private val liawbNameBarColor by color("Liawb-NameBarColor", Color(0, 0, 0, 120)) { hudStyle == "Liawb" && liawbNameBar }
+    // =============== Liawb 模式设置结束 ===============
 
     private val riseNewShadowCheck by boolean("RiseNew-Shadow", true) { hudStyle == "RiseNew" }
 
@@ -194,7 +226,9 @@ object TargetHUD : Module("TargetHUD", Category.RENDER) {
         hue += 0.05f * deltaTime * 0.1f
         if (hue > 1F) hue = 0F
         slideIn = lerp(slideIn, if (target != null) 1F else 0F, animSpeed)
-        if (slideIn < 0.01F && target == null) {
+        // Liawb 弹性动画需要自己控制消失过程，绕过 slideIn 的提前 return
+        val liawbFadingOut = hudStyle == "Liawb" && liawbAnimMode == "Bounce" && liawbAlpha > 0.01F
+        if (slideIn < 0.01F && target == null && !liawbFadingOut) {
             GlStateManager.popMatrix()
             glPopAttrib()
             return@handler
@@ -221,6 +255,7 @@ object TargetHUD : Module("TargetHUD", Category.RENDER) {
             "opai" -> renderOpaiHUD(sr)
             "risenew" -> renderRiseNewHUD(x, y)
             "risemodern" -> renderRiseModernHUD(x, y)
+            "liawb" -> renderLiawbHUD(x, y)
         }
 
         GlStateManager.popMatrix()
@@ -955,6 +990,380 @@ object TargetHUD : Module("TargetHUD", Category.RENDER) {
         GlStateManager.popMatrix()
         glPopAttrib()
     }
+
+    // ================= Liawb 渲染 =================
+    private val liawbInventoryTexture = ResourceLocation("textures/gui/container/inventory.png")
+
+    private fun renderLiawbHUD(x: Float, y: Float) {
+        // 消失动画期间 target 已经为 null，用单独缓存的上一个目标继续画
+        val entity = target ?: liawbLastEntity ?: return
+        if (target != null) liawbLastEntity = target
+        NavenEasingHealth = lerp(NavenEasingHealth, entity.health, animSpeed)
+        val width = 160F
+        val height = 70F
+        val radius = liawbRadius
+
+        val animOn = liawbAnimMode == "Bounce"
+        if (animOn) {
+            updateLiawbAnimation()
+            // 关闭阶段：只画整张快照并统一淡出/缩小（物品、图标、模糊、阴影一起走）
+            if (!liawbShown && liawbSnapshot && !liawbJustHidden) {
+                drawLiawbSnapshot(x, y, liawbAlpha, liawbScale * liawbUiScale)
+                return
+            }
+            if (liawbAlpha <= 0.01F) return
+        }
+        val animScale = if (animOn) liawbScale else slideIn
+        // None 模式下也让透明度跟随 slideIn 淡出，避免"整体突然消失"
+        val animAlpha = if (animOn) liawbAlpha else slideIn.coerceIn(0F, 1F)
+        // HUD 大小可调（与动画缩放相乘）
+        val totalScale = animScale * liawbUiScale
+
+        // 背景模糊：跟随缩放后的真实矩形（居中缩放，位置/尺寸/圆角都要跟着变）
+        // 阈值放很低，避免淡出尾声模糊突然消失造成"闪一下"
+        if (animAlpha > 0.01F) {
+            val scaledW = width * totalScale
+            val scaledH = height * totalScale
+            drawHudBlur(
+                x + (width - scaledW) / 2F,
+                y + (height - scaledH) / 2F,
+                scaledW, scaledH,
+                radius * totalScale
+            )
+        }
+
+        GlStateManager.pushMatrix()
+        // 以面板中心为缩放原点，避免从左上角"弹"出去
+        GlStateManager.translate(x + width / 2F, y + height / 2F, 0F)
+        GlStateManager.scale(totalScale, totalScale, totalScale)
+        GlStateManager.translate(-width / 2F, -height / 2F, 0F)
+
+        // Glow 阴影（可调颜色/强度 + mask）
+        if (liawbShadowCheck && animAlpha > 0.01F) {
+            GlowUtils.drawGlow(
+                0F, 0F, width, height,
+                (liawbShadowStrength * 13F).toInt(), liawbShadowColor.withAlphaMul(animAlpha),
+                cornerRadius = radius, mask = liawbShadowMask
+            )
+        }
+
+        drawRoundedRect(0F, 0F, width, height, liawbBackgroundColor.withAlphaMul(animAlpha).rgb, radius)
+
+        val textColor = liawbTextColor.withAlphaMul(animAlpha).rgb
+
+        // ---- 血量圆环（激活/非激活两段可自定义颜色）----
+        val ringCX = 22F
+        val ringCY = height / 2F
+        val healthPercent = (NavenEasingHealth / entity.maxHealth).coerceIn(0F, 1F)
+        drawRing(ringCX, ringCY, liawbRingRadius, liawbRingThickness, 0F, 360F, liawbRingBackColor.withAlphaMul(animAlpha))
+        if (healthPercent > 0F)
+            drawRing(ringCX, ringCY, liawbRingRadius, liawbRingThickness, -90F, -90F + 360F * healthPercent, liawbRingColor.withAlphaMul(animAlpha))
+
+        // 圆环内显示血量百分比
+        val hpText = "${(healthPercent * 100).toInt()}%"
+        val hpW = liawbInfoFont.getStringWidth(hpText)
+        liawbInfoFont.drawString(hpText, ringCX - hpW / 2F, ringCY - 5F, textColor, false)
+
+        // ---- 头像（跟随整体透明度，否则消失时会突兀地保持不透明）----
+        mc.netHandler.getPlayerInfo(entity.uniqueID)?.let {
+            drawRoundedHead(it.locationSkin, 40, (ringCY - 13F).toInt(), 26, 26, Color.WHITE.withAlphaMul(animAlpha), 5f)
+        }
+
+        val textX = 70F
+
+        // ---- 名字顶部底条（可选 + 可选颜色）----
+        if (liawbNameBar) {
+            val nameWidth = liawbNameFont.getStringWidth(entity.name)
+            drawRoundedRect(
+                textX - 2F, 4F,
+                textX + nameWidth + 3F, 18F,
+                liawbNameBarColor.withAlphaMul(animAlpha).rgb, 3F
+            )
+        }
+
+        // ---- 名字 ----
+        liawbNameFont.drawString(entity.name, textX, 6F, textColor, false)
+
+        // ---- 主手物品（图标 + 数量 + 耐久）----
+        if (liawbShowMainHand) {
+            entity.heldItem?.let { stack ->
+                drawItemStack(stack, textX.toInt(), 22, animAlpha)
+                val durText: String
+                val durPercent: Float
+                if (stack.isItemStackDamageable && stack.maxDamage > 0) {
+                    val remain = stack.maxDamage - stack.itemDamage
+                    durText = "$remain/${stack.maxDamage}"
+                    durPercent = remain.toFloat() / stack.maxDamage
+                } else {
+                    durText = "x${stack.stackSize}"
+                    durPercent = 1F
+                }
+                val durColor = ColorUtils.interpolateColor(Color(255, 60, 60), Color(90, 255, 120), durPercent)
+                    .withAlphaMul(animAlpha).rgb
+                liawbInfoFont.drawString(durText, textX + 18F, 26F, durColor, false)
+            }
+        }
+
+        // ---- 护甲（图标行 + 可选数字耐久 + 可选总耐久圆环）----
+        if (liawbShowArmor && entity is EntityPlayer) {
+            var totalDur = 0F
+            var totalMax = 0F
+            var armorX = textX
+            val armorY = 42F
+
+            glPushMatrix()
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            enableGUIStandardItemLighting()
+            GlStateManager.color(1F, 1F, 1F, animAlpha)
+            for (index in 3 downTo 0) {
+                val stack = entity.inventory.armorInventory[index]
+                if (stack != null) {
+                    GlStateManager.color(1F, 1F, 1F, animAlpha)
+                    mc.renderItem.renderItemIntoGUI(stack, armorX.toInt(), armorY.toInt())
+                    GlStateManager.color(1F, 1F, 1F, animAlpha)
+                    mc.renderItem.renderItemOverlays(mc.fontRendererObj, stack, armorX.toInt(), armorY.toInt())
+                    if (stack.isItemStackDamageable && stack.maxDamage > 0) {
+                        val remain = stack.maxDamage - stack.itemDamage
+                        totalDur += remain
+                        totalMax += stack.maxDamage
+                        if (liawbArmorNumbers) {
+                            val pct = remain.toFloat() / stack.maxDamage
+                            val c = ColorUtils.interpolateColor(Color(255, 60, 60), Color(90, 255, 120), pct)
+                                .withAlphaMul(animAlpha).rgb
+                            liawbInfoFont.drawString("$remain", armorX + 1F, armorY + 16F, c, false)
+                        }
+                    }
+                }
+                armorX += 16F
+            }
+            disableStandardItemLighting()
+            GlStateManager.color(1F, 1F, 1F, 1F)
+            glDisable(GL_BLEND)
+            glPopMatrix()
+
+            // 总耐久圆环（右上角小环）
+            if (liawbArmorRing && totalMax > 0F) {
+                val pct = (totalDur / totalMax).coerceIn(0F, 1F)
+                val acx = width - 10F
+                val acy = 10F
+                drawRing(acx, acy, 8F, 2.5F, 0F, 360F, liawbArmorRingBackColor.withAlphaMul(animAlpha))
+                if (pct > 0F)
+                    drawRing(acx, acy, 8F, 2.5F, -90F, -90F + 360F * pct, liawbArmorRingColor.withAlphaMul(animAlpha))
+            }
+        }
+
+        // ---- 药水效果（仅图标，右侧竖排）----
+        if (liawbShowPotions) {
+            var potionY = 24F
+            for (effect in entity.activePotionEffects) {
+                if (potionY > height - 18F) break
+                val potion = Potion.potionTypes[effect.potionID] ?: continue
+                if (!potion.hasStatusIcon()) continue
+                mc.textureManager.bindTexture(liawbInventoryTexture)
+                GlStateManager.color(1F, 1F, 1F, animAlpha)
+                val iconX = potion.statusIconIndex % 8 * 18
+                val iconY = 198 + potion.statusIconIndex / 8 * 18
+                RenderUtils.drawTexturedModalRect((width - 19F).toInt(), potionY.toInt(), iconX, iconY, 18, 18, 0F)
+                potionY += 16F
+            }
+        }
+
+        GlStateManager.popMatrix()
+
+        // 关闭的第一帧：把刚画好的整个 HUD 区域抓成一张纹理，
+        // 之后只画这张图整体缩小 + 淡出（物品图标/药水/模糊/阴影都在图里一起走）
+        if (animOn && liawbJustHidden) {
+            captureLiawb(x, y, width, height, totalScale)
+            liawbJustHidden = false
+        }
+    }
+
+    /** 把 HUD 当前占据的屏幕区域复制到纹理里 */
+    private fun captureLiawb(x: Float, y: Float, w: Float, h: Float, scale: Float) {
+        val sw = (w * scale).toInt()
+        val sh = (h * scale).toInt()
+        if (sw <= 0 || sh <= 0) return
+        val sr = ScaledResolution(mc)
+        val sf = sr.scaleFactor.toFloat()
+        // 居中缩放后的实际矩形（GUI 坐标）
+        val gx = x + (w - w * scale) / 2F
+        val gy = y + (h - h * scale) / 2F
+        // 转成帧缓冲像素坐标（GL 原点在左下角）
+        val px = (gx * sf).toInt()
+        val py = (mc.displayHeight - (gy + h * scale) * sf).toInt()
+
+        if (liawbTexId == -1) liawbTexId = glGenTextures()
+        glBindTexture(GL_TEXTURE_2D, liawbTexId)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, org.lwjgl.opengl.GL12.GL_CLAMP_TO_EDGE)
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGBA, sw, sh, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, null as java.nio.ByteBuffer?
+        )
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, px, py, sw, sh)
+
+        liawbCapX = gx; liawbCapY = gy
+        liawbCapW = w * scale; liawbCapH = h * scale
+        liawbSnapshot = true
+    }
+
+    /** 画快照：整体缩放 + 统一 alpha 淡出 */
+    private fun drawLiawbSnapshot(x: Float, y: Float, alpha: Float, scale: Float) {
+        if (liawbTexId == -1 || liawbCapW <= 0F) return
+        val a = alpha.coerceIn(0F, 1F)
+        if (a <= 0.01F) { liawbSnapshot = false; return }
+
+        val w = liawbCapW * scale
+        val h = liawbCapH * scale
+        val left = x + (liawbCapW - w) / 2F
+        val top = y + (liawbCapH - h) / 2F
+
+        glPushAttrib(GL_ALL_ATTRIB_BITS)
+        glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D, liawbTexId)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glColor4f(1F, 1F, 1F, a)
+        glBegin(GL_QUADS)
+        // 纹理 (0,0) 对应区域左下角，屏幕绘制 y 向下 → 上边用 v=1
+        glTexCoord2f(0F, 1F); glVertex2f(left, top)
+        glTexCoord2f(1F, 1F); glVertex2f(left + w, top)
+        glTexCoord2f(1F, 0F); glVertex2f(left + w, top + h)
+        glTexCoord2f(0F, 0F); glVertex2f(left, top + h)
+        glEnd()
+        glColor4f(1F, 1F, 1F, 1F)
+        glPopAttrib()
+    }
+    private fun drawRing(cx: Float, cy: Float, radius: Float, thickness: Float, startDeg: Float, endDeg: Float, color: Color) {
+        glPushAttrib(GL_ALL_ATTRIB_BITS)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_LINE_SMOOTH)
+        glBegin(GL_TRIANGLE_STRIP)
+        val steps = 72
+        var i = 0
+        while (i <= steps) {
+            val angle = Math.toRadians(startDeg + (endDeg - startDeg) * (i.toDouble() / steps))
+            val cosA = cos(angle).toFloat()
+            val sinA = sin(angle).toFloat()
+            glColor4f(color.red / 255f, color.green / 255f, color.blue / 255f, color.alpha / 255f)
+            glVertex2f(cx + cosA * (radius - thickness / 2F), cy + sinA * (radius - thickness / 2F))
+            glVertex2f(cx + cosA * (radius + thickness / 2F), cy + sinA * (radius + thickness / 2F))
+            i++
+        }
+        glEnd()
+        glDisable(GL_LINE_SMOOTH)
+        glEnable(GL_TEXTURE_2D)
+        glPopAttrib()
+    }
+
+    /** 物品图标（含数量/耐久 overlay） */
+    private fun drawItemStack(stack: ItemStack, x: Int, y: Int, alpha: Float = 1f) {
+        GlStateManager.pushMatrix()
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        enableGUIStandardItemLighting()
+        GlStateManager.color(1F, 1F, 1F, alpha)
+        mc.renderItem.renderItemIntoGUI(stack, x, y)
+        GlStateManager.color(1F, 1F, 1F, alpha)
+        mc.renderItem.renderItemOverlays(mc.fontRendererObj, stack, x, y)
+        GlStateManager.color(1F, 1F, 1F, 1F)
+        disableStandardItemLighting()
+        glDisable(GL_BLEND)
+        GlStateManager.popMatrix()
+    }
+
+    // ================= Liawb 弹性动画状态（弹簧模型，速度连续无顿挫） =================
+    private var liawbLastEntity: EntityLivingBase? = null
+    private var liawbShown = false
+    private var liawbAlpha = 1F
+    private var liawbScale = 1F
+    private var liawbScaleVel = 0F
+    private var liawbAlphaVel = 0F
+    private var liawbLastHideAt = 0L
+
+    // ---- 关闭时整张快照淡出（物品/图标等无法单独调 alpha 的元素也一起走）----
+    private var liawbTexId = -1
+    private var liawbSnapshot = false
+    private var liawbJustHidden = false
+    private var liawbCapX = 0F
+    private var liawbCapY = 0F
+    private var liawbCapW = 0F
+    private var liawbCapH = 0F
+
+    /**
+     * 弹簧动画（帧率无关）：
+     *  - 出现：scale 从 0.55 弹向 1.0，欠阻尼自然过冲后回落；alpha 平滑淡入
+     *  - 消失：先给一个向上冲量（视觉上先膨胀一下），再缩向 0.60，alpha 同步淡出
+     * 连续速度曲线，没有分段缓动那种"一顿一顿"的顿挫感。
+     */
+    private fun updateLiawbAnimation() {
+        val has = target != null
+        val dt = (deltaTime / 1000F).coerceIn(0.001F, 0.05F)
+
+        if (has && !liawbShown) {
+            liawbShown = true
+            liawbSnapshot = false
+            liawbJustHidden = false
+            // 宽限期：刚消失没多久又重新出现（换目标/目标短暂丢失）→ 直接以正常大小显示，
+            // 不重播"从 0.55 弹入"，否则收尾时会看到一次闪
+            val quickReappear = System.currentTimeMillis() - liawbLastHideAt < 250L
+            if (quickReappear) {
+                liawbScale = 1F
+                liawbScaleVel = 0F
+                liawbAlpha = 1F
+                liawbAlphaVel = 0F
+            } else {
+                liawbScale = 0.55F
+                liawbScaleVel = 0F
+                liawbAlpha = 0F
+                liawbAlphaVel = 0F
+            }
+        } else if (!has && liawbShown) {
+            liawbShown = false
+            liawbLastHideAt = System.currentTimeMillis()
+            // 这一帧不开始衰减：先按原样把完整面板画出来供抓图，下一帧起改用快照淡出
+            liawbJustHidden = true
+            liawbScale = 1F
+            liawbScaleVel = 0F
+            liawbAlpha = 1F
+            liawbAlphaVel = 0F
+            return
+        }
+
+        // 快照淡出：缩到最小 + 淡到全透明（模糊/阴影都烘进图里一起缩）
+        val targetScale = if (has) 1F else 0.2F
+        val targetAlpha = if (has) 1F else 0F
+
+        // scale 弹簧（欠阻尼 → 出现时自然过冲再回落）
+        val kS = if (has) 170F else 150F
+        val cS = if (has) 13F else 14F
+        liawbScaleVel += (targetScale - liawbScale) * kS * dt
+        liawbScaleVel *= (1F - cS * dt).coerceIn(0F, 1F)
+        liawbScale += liawbScaleVel * dt
+
+        // alpha 平滑追随（放慢一点，淡出更柔和，不突兀）
+        val kA = 90F
+        val cA = 17F
+        liawbAlphaVel += (targetAlpha - liawbAlpha) * kA * dt
+        liawbAlphaVel *= (1F - cA * dt).coerceIn(0F, 1F)
+        liawbAlpha = (liawbAlpha + liawbAlphaVel * dt).coerceIn(0F, 1F)
+
+        // 静止复位，避免数值长期漂移
+        if (has && abs(targetScale - liawbScale) < 0.001F && abs(liawbScaleVel) < 0.01F) {
+            liawbScale = 1F
+            liawbScaleVel = 0F
+        }
+        if (liawbAlpha > 0.999F) { liawbAlpha = 1F; liawbAlphaVel = 0F }
+        if (liawbAlpha < 0.001F) { liawbAlpha = 0F; liawbAlphaVel = 0F }
+    }
+
+    private fun Color.withAlphaMul(mult: Float): Color =
+        Color(red, green, blue, (alpha * mult).toInt().coerceIn(0, 255))
 
     override fun onDisable() {
         GlStateManager.color(1f, 1f, 1f, 1f)

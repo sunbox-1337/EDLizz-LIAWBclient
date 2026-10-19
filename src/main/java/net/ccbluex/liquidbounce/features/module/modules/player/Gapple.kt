@@ -42,6 +42,23 @@ object Gapple : Module("Gapple", Category.PLAYER) {
     var noC02 by boolean("NoC02", false)
     private val autoGapple by boolean("AutoGapple", false)
 
+    // ---------- 高版本（跨版本）适配 ----------
+    // Off     ：直连 1.8，按原生流程走，不多发任何包
+    // KeepAlive：跨 1.9+ 时，吃的过程中每 tick 补发一个 UseItem，维持服务端进食进度
+    // Finish  ：跨 1.9+ 时，只补发「完成进食」的收尾包（原逻辑只认 ≥1.12.2，1.9 不触发）
+    //
+    // 注意：可选且默认 Off。多发的包在带反作弊（Grim）的服上可能被判异常并叠 NoSlow 的 VL，
+    // VL 够了反作弊会 resetItemUsage，反而吃不了。确认需要再开。
+    private val viaMode by choices("ViaMode(高版本)", arrayOf("Off", "KeepAlive", "Finish"), "Off")
+
+    /** 是否启用「每 tick 补发 UseItem」保活（供 MixinEntityPlayerSP 调用）。 */
+    fun isViaKeepAlive() = viaMode == "KeepAlive"
+
+    /** 是否补发「完成进食」收尾包。 */
+    private fun shouldSendViaFinish() = viaMode == "Finish" ||
+        viaMode == "KeepAlive" ||
+        ViaLoadingBase.getInstance().targetVersion.newerThanOrEqualTo(ProtocolVersion.v1_9)
+
     // ---------- 智能延迟吃苹果 ----------
     private val smartGapple by boolean("SmartGapple", false) { autoGapple }
     private val maxSmartDelay by int("MaxSmartDelay", 55, 0..200) { smartGapple }
@@ -199,7 +216,9 @@ object Gapple : Module("Gapple", Category.PLAYER) {
                 BlinkUtils.resetBlackList()
                 sendPacket(C09PacketHeldItemChange(slot), false)
                 sendPacket(C08PacketPlayerBlockPlacement(MinecraftInstance.mc.thePlayer.inventoryContainer.getSlot(slot + 36).stack), false)
-                if (ViaLoadingBase.getInstance().targetVersion.newerThanOrEqualTo(ProtocolVersion.v1_12_2)) {
+                // 原逻辑只在 ≥1.12.2 发收尾包，跨 1.9 时永远不触发 → 自动吃收不了尾。
+                // 改为：ViaMode 开启，或目标版本 ≥1.9 就发。
+                if (shouldSendViaFinish()) {
                     sendPacket(C08PacketPlayerBlockPlacement(BlockPos(-1, -2, -1), 255, null, 0.0f, 0.0f, 0.0f), false)
                 }
                 BlinkUtils.stopBlink()

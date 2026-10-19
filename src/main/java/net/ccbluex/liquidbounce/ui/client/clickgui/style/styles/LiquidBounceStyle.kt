@@ -42,6 +42,7 @@ import net.minecraftforge.fml.relauncher.Side
 import net.minecraftforge.fml.relauncher.SideOnly
 import java.awt.Color
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.roundToInt
 
 @SideOnly(Side.CLIENT)
@@ -446,6 +447,43 @@ object LiquidBounceStyle : Style() {
         return next
     }
 
+    /** 弹簧状态：[位置, 速度] */
+    private val springStates = HashMap<Any, FloatArray>()
+
+    /**
+     * 带过冲的弹簧：冲过目标一点再弹回来（「弹出来弹过了再缩回去」）。
+     * stiffness 越大越快，damping 越小弹得越明显。
+     * 固定 8ms 子步进，低帧率也不会弹飞。
+     */
+    private fun spring(key: Any, target: Float, stiffness: Float = 380F, damping: Float = 17F): Float {
+        val dt = (deltaTime.coerceIn(1, 50) / 1000F)
+        val state = springStates.getOrPut(key) { floatArrayOf(target, 0F) }
+
+        var position = state[0]
+        var velocity = state[1]
+
+        var remaining = dt
+        while (remaining > 0F) {
+            val h = if (remaining > 0.008F) 0.008F else remaining
+
+            velocity += (target - position) * stiffness * h
+            velocity *= exp(-damping * h).toFloat()
+            position += velocity * h
+
+            remaining -= h
+        }
+
+        if (abs(position - target) < 0.002F && abs(velocity) < 0.02F) {
+            state[0] = target
+            state[1] = 0F
+            return target
+        }
+
+        state[0] = position
+        state[1] = velocity
+        return position
+    }
+
     override fun drawPanel(mouseX: Int, mouseY: Int, panel: Panel) {
         val radius = ClickGUI.lbPanelRadius
         val left = panel.x.toFloat()
@@ -458,7 +496,7 @@ object LiquidBounceStyle : Style() {
         drawRoundedRect(left, top, right, bottom, ClickGUI.lbPanelColor.rgb, radius)
         drawRoundedBorder(left, top, right, bottom, 1F, ClickGUI.lbPanelBorderColor.rgb, radius)
 
-        val xPos = panel.x - (fontSemibold35.getStringWidth(StringUtils.stripControlCodes(panel.name)) - 100) / 2
+        val xPos = panel.x - (fontSemibold35.getStringWidth(StringUtils.stripControlCodes(panel.name)) - panel.width) / 2
         fontSemibold35.drawString(panel.name, xPos, panel.y + 6, Color.WHITE.rgb)
 
         if (false) { // 滚动条已停用：只保留滚轮滑动（原条件 panel.scrollbar && panel.fade > 0）
@@ -495,7 +533,7 @@ object LiquidBounceStyle : Style() {
     }
 
     override fun drawButtonElement(mouseX: Int, mouseY: Int, buttonElement: ButtonElement) {
-        val xPos = buttonElement.x - (fontSemibold35.getStringWidth(buttonElement.displayName) - 100) / 2
+        val xPos = buttonElement.x - (fontSemibold35.getStringWidth(buttonElement.displayName) - buttonElement.width) / 2
         fontSemibold35.drawString(buttonElement.displayName, xPos, buttonElement.y + 6, buttonElement.color)
     }
 
@@ -503,7 +541,7 @@ object LiquidBounceStyle : Style() {
         mouseX: Int, mouseY: Int, moduleElement: ModuleElement, mouseButton: Int?
     ): Boolean {
         // 开启的模块：整行上色（不圆角）+ 同色的模糊
-        if (moduleElement.module.state && ClickGUI.lbModuleColor.alpha > 0) {
+        if (!moduleElement.hideRow && moduleElement.module.state && ClickGUI.lbModuleColor.alpha > 0) {
             val rowLeft = moduleElement.x.toFloat()
             val rowTop = moduleElement.y.toFloat()
             val rowRight = (moduleElement.x + moduleElement.width).toFloat()
@@ -520,24 +558,44 @@ object LiquidBounceStyle : Style() {
             drawRoundedRect(rowLeft, rowTop, rowRight, rowBottom, ClickGUI.lbModuleColor.rgb, 0F)
         }
 
-        val xPos = moduleElement.x - (fontSemibold35.getStringWidth(moduleElement.displayName) - 100) / 2
-        fontSemibold35.drawString(
-            moduleElement.displayName, xPos, moduleElement.y + 6, if (moduleElement.module.state) {
-                if (moduleElement.module.isActive) guiColor
-                // Make inactive modules have alpha set to 100
-                else (guiColor and 0x00FFFFFF) or (0x64 shl 24)
-            } else Int.MAX_VALUE
-        )
+        if (!moduleElement.hideRow) {
+            val xPos = moduleElement.x - (fontSemibold35.getStringWidth(moduleElement.displayName) - moduleElement.width) / 2
+            fontSemibold35.drawString(
+                moduleElement.displayName, xPos, moduleElement.y + 6, if (moduleElement.module.state) {
+                    if (moduleElement.module.isActive) guiColor
+                    // Make inactive modules have alpha set to 100
+                    else (guiColor and 0x00FFFFFF) or (0x64 shl 24)
+                } else Int.MAX_VALUE
+            )
+        }
 
         val moduleValues = moduleElement.module.values.filter { it.shouldRender() }
         if (moduleValues.isNotEmpty()) {
             if (moduleElement.showSettings) {
-                var yPos = moduleElement.y + 4
+                // settingsBelow：设置面板画在行下方（新布局的右列），否则画在行右侧（经典布局）
+                val below = moduleElement.settingsBelow
+                val settingsTop = if (below) {
+                    moduleElement.y + moduleElement.height + 3
+                } else {
+                    moduleElement.y + 4
+                }
 
-                val minX = moduleElement.x + moduleElement.width + 4
-                val maxX = moduleElement.x + moduleElement.width + moduleElement.settingsWidth
+                var yPos = settingsTop
 
-                if (moduleElement.settingsWidth > 0 && moduleElement.settingsHeight > 0) {
+                val minX = if (below) {
+                    moduleElement.x + 2
+                } else {
+                    moduleElement.x + moduleElement.width + 4
+                }
+
+                val maxX = if (below) {
+                    moduleElement.x + moduleElement.width - 2
+                } else {
+                    moduleElement.x + moduleElement.width + moduleElement.settingsWidth
+                }
+
+                // settingsBelow 时设置列本身就是一个面板，不再套一层子面板
+                if (!below && moduleElement.settingsWidth > 0 && moduleElement.settingsHeight > 0) {
                     val subLeft = minX.toFloat()
                     val subTop = yPos.toFloat()
                     val subRight = maxX.toFloat()
@@ -576,8 +634,9 @@ object LiquidBounceStyle : Style() {
                                 text, minX + 2, yPos + 3, if (enabled) guiColor else Int.MAX_VALUE
                             )
 
-                            // 圆头滑动动画（缓出）
-                            val slide = easeOut(value, if (enabled) 1F else 0F)
+                            // 圆头滑动：弹簧过冲，弹到尽头再回弹一点
+                            val slide = spring(value, if (enabled) 1F else 0F).coerceIn(-0.15F, 1.15F)
+                            val slideClamped = slide.coerceIn(0F, 1F)
 
                             val capsuleX = maxX - capsuleWidth - 3F
                             val capsuleY = yPos + 3F
@@ -588,7 +647,7 @@ object LiquidBounceStyle : Style() {
                             // 白色始终画在黑色之上，所以两个图层是叠出来的立体感。
                             // alpha 按 32 阶梯量化 —— drawGlow 会把阴影烘焙成贴图并缓存，
                             // 逐帧变化的 alpha 会不停新建贴图。
-                            val whiteAlpha = (160 * slide).toInt() / 32 * 32
+                            val whiteAlpha = (160 * slideClamped).toInt() / 32 * 32
 
                             GlowUtils.drawGlow(
                                 capsuleX, capsuleY, capsuleWidth, capsuleHeight,
@@ -605,7 +664,7 @@ object LiquidBounceStyle : Style() {
                             }
 
                             // 胶囊：灰 → 白
-                            val capsuleShade = (90 + (255 - 90) * slide).toInt()
+                            val capsuleShade = (90 + (255 - 90) * slideClamped).toInt()
                             drawRoundedRect(
                                 capsuleX, capsuleY, capsuleX + capsuleWidth, capsuleY + capsuleHeight,
                                 Color(capsuleShade, capsuleShade, capsuleShade, 255).rgb, capsuleHeight / 2F
@@ -645,9 +704,9 @@ object LiquidBounceStyle : Style() {
                             // 展开 / 收起动画（缓出）
                             val expand = easeOut(AnimKey(value, "expand"), if (value.openList) 1F else 0F)
 
-                            // 选择动画：高亮在行与行之间滑过去，而不是瞬移
+                            // 选择动画：高亮在行与行之间弹过去，过头一点再回弹
                             val selectedIndex = value.values.indexOf(value.get()).coerceAtLeast(0)
-                            val indexAnim = easeOut(AnimKey(value, "index"), selectedIndex.toFloat())
+                            val indexAnim = spring(AnimKey(value, "index"), selectedIndex.toFloat(), 320F, 15F)
 
                             val entryHeight = 12 * expand
                             val listTop = (yPos - 1).toFloat()
@@ -976,7 +1035,7 @@ object LiquidBounceStyle : Style() {
 
                             val spacing = 12
 
-                            val startX = moduleElement.x + moduleElement.width + 4
+                            val startX = minX
                             val startY = yPos - 1
 
                             // Color preview
@@ -1440,12 +1499,14 @@ object LiquidBounceStyle : Style() {
                     }
                 }
 
-                moduleElement.adjustWidth()
+                if (moduleElement.forcedSettingsWidth <= 0) {
+                    moduleElement.adjustWidth()
+                }
 
-                moduleElement.settingsHeight = yPos - moduleElement.y - 4
+                moduleElement.settingsHeight = yPos - settingsTop
 
-                if (moduleElement.settingsWidth > 0 && yPos > moduleElement.y + 4) {
-                    if (mouseButton != null && mouseX in minX..maxX && mouseY in moduleElement.y + 6..yPos + 2) {
+                if (moduleElement.settingsWidth > 0 && yPos > settingsTop) {
+                    if (mouseButton != null && mouseX in minX..maxX && mouseY in settingsTop + 2..yPos + 2) {
                         return true
                     }
                 }

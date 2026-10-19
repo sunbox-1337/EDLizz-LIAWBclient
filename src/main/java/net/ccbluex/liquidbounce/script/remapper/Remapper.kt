@@ -32,6 +32,9 @@ object Remapper {
 
     /**
      * Load srg
+     *
+     * 完全离线：绝不联网下载（网络一卡会拖死整个启动加载）。
+     * 只用本地已有的 srg 文件；没有就直接跳过（脚本 remap 不可用，但游戏照常跑）。
      */
     fun loadSrg() {
         if (mappingsLoaded) return
@@ -41,24 +44,9 @@ object Remapper {
 
             mappingsLoaded = false
 
-            // Download sha256 file
-            val sha256File = File(dir, "mcp-$SRG_NAME.srg.sha256")
-            if (!sha256File.exists() || !sha256File.isFile || sha256File.isEmpty) {
-                sha256File.createNewFile()
-
-                Downloader.downloadWholeFile("$CLIENT_CLOUD/srgs/mcp-$SRG_NAME.srg.sha256", sha256File)
-                LOGGER.info("[Remapper] Downloaded $SRG_NAME sha256.")
-            }
-
-            // Check if srg file is already downloaded
-            if (!srgFile.exists() || !hashMatches(srgFile, sha256File)) {
-                // Download srg file
-                srgFile.createNewFile()
-
-                runBlocking {
-                    Downloader.download("$CLIENT_CLOUD/srgs/mcp-$SRG_NAME.srg", srgFile)
-                }
-                LOGGER.info("[Remapper] Downloaded $SRG_NAME.")
+            if (!srgFile.exists() || srgFile.isEmpty) {
+                LOGGER.error("[Remapper] Local $SRG_NAME missing, skipping download entirely (offline mode). Scripts may not work.")
+                return
             }
 
             // Load srg
@@ -66,7 +54,7 @@ object Remapper {
 
             mappingsLoaded = true
 
-            LOGGER.info("[Remapper] Successfully loaded SRG mappings.")
+            LOGGER.info("[Remapper] Successfully loaded SRG mappings from local file.")
         }
     }
 

@@ -134,6 +134,8 @@ public class MixinNetworkManager {
                             UserConnection user = new UserConnectionImpl(p_initChannel_1_, true);
                             new ProtocolPipelineImpl(user);
                             p_initChannel_1_.pipeline().addLast(new MCPVLBPipeline(user));
+                            // PacketFix：1.20.5 sequence 补丁（主界面开关控制）
+                            net.ccbluex.liquidbounce.utils.client.PacketFix.install(p_initChannel_1_, user);
                         }
                     }
                 })

@@ -44,15 +44,17 @@ fun FontRenderer.drawCenteredString(
  * @author opZywl
  */
 class GameFontRenderer(
-    font: Font
+    font: Font,
+    /** 中文字体打开：允许图集里按需生成图集外字形 */
+    dynamicGlyphs: Boolean = false
 ) : FontRenderer(
     mc.gameSettings, ResourceLocation("textures/font/ascii.png"), mc.textureManager, false
 ) {
 
-    val defaultFont = AWTFontRenderer(font)
-    private val boldFont = AWTFontRenderer(font.deriveFont(Font.BOLD))
-    private val italicFont = AWTFontRenderer(font.deriveFont(Font.ITALIC))
-    private val boldItalicFont = AWTFontRenderer(font.deriveFont(Font.BOLD or Font.ITALIC))
+    val defaultFont = AWTFontRenderer(font, dynamicGlyphs = dynamicGlyphs)
+    private val boldFont = AWTFontRenderer(font.deriveFont(Font.BOLD), dynamicGlyphs = dynamicGlyphs)
+    private val italicFont = AWTFontRenderer(font.deriveFont(Font.ITALIC), dynamicGlyphs = dynamicGlyphs)
+    private val boldItalicFont = AWTFontRenderer(font.deriveFont(Font.BOLD or Font.ITALIC), dynamicGlyphs = dynamicGlyphs)
 
     val fontHeight: Int
     val size: Int

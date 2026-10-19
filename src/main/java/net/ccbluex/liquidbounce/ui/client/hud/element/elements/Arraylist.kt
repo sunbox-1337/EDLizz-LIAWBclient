@@ -37,6 +37,7 @@ import net.ccbluex.liquidbounce.utils.extras.GlowUtils2
 import net.minecraft.client.gui.ScaledResolution
 import net.minecraft.client.renderer.GlStateManager.resetColor
 import java.awt.Color
+import kotlin.math.roundToInt
 
 @ElementInfo(name = "Arraylist", single = true)
 class Arraylist(
@@ -92,9 +93,19 @@ class Arraylist(
         "Background-Mode", arrayOf("Custom", "Fade", "Random", "Rainbow", "Gradient"), "Custom"
     )
     private val shadowcheck by boolean("Shadowcheck", false)
-    private val shadowStrength by float("ShadowStrength", 0.5f, 1.0f..2.0f)
+    private val shadowStrength by float("ShadowStrength", 0.5f, 0.02f..2.0f)
+
+    /** 1px 内阴影：模糊/裁切偶尔会留下一条透明边，用内描边盖住 */
+    private val innerShadow by boolean("InnerShadow1px", false)
+
+    /** 阴影模糊半径（像素）：最低 1px，支持"超级小"的细边阴影 */
+    private val shadowRadius: Int
+        get() = (shadowStrength * 13F).toInt().coerceAtLeast(1)
     private val shadowCheckColor by color("ShadowCheckColor", Color(0, 0, 0, 120)) { shadowcheck }
     private val shadowMask by boolean("ShadowMask", false) { shadowcheck }
+
+    /** 阴影颜色跟随该行文字颜色（渐变的行取自定义文字色） */
+    private val shadowFollowText by boolean("ShadowFollowText", false) { shadowcheck || glow }
     private val glow by boolean("Glow", false)
 
     private val bgColors =
@@ -316,6 +327,32 @@ class Arraylist(
 
     private val inactiveColor = Color(255, 255, 255, 100).rgb
 
+    /** 吸附到整数像素：矩形坐标只用整像素，动画本身保留小数没有关系 */
+    private fun snap(value: Float): Float = value.roundToInt().toFloat()
+
+    /** 文本基线偏移也取整，保证整行只在整像素上移动 */
+    private val textOffsetY: Float
+        get() = snap(textY)
+
+    /**
+     * 阴影颜色：默认用 ShadowCheckColor，
+     * 打开 ShadowFollowText 后取该行文字实际用的颜色（渐变/彩虹没有单一颜色，退回自定义文字色）。
+     */
+    private fun shadowColorFor(markAsInactive: Boolean, textRgb: Int): Color {
+        if (!shadowFollowText) return shadowCheckColor
+
+        return Color(if (markAsInactive) inactiveColor else textRgb, true)
+    }
+
+    /** 1px 内阴影：沿矩形内侧画一圈 1px 实心边，盖住模糊/裁切留下的透明缝 */
+    private fun drawInnerShadow(rect: FloatArray) {
+        val color = shadowCheckColor.rgb
+        drawRect(rect[0], rect[1], rect[2], rect[1] + 1f, color)
+        drawRect(rect[0], rect[3] - 1f, rect[2], rect[3], color)
+        drawRect(rect[0], rect[1], rect[0] + 1f, rect[3], color)
+        drawRect(rect[2] - 1f, rect[1], rect[2], rect[3], color)
+    }
+
     private val isCustomRectSupported
         get() = rectMode != "None" && rectColorMode == "Custom"
 
@@ -411,6 +448,8 @@ class Arraylist(
             val shadowRects = ArrayList<FloatArray>()
             // 本趟算出的每行 y 会被下面绘制趟复用，保证阴影与实际绘制的行完全对齐
             val rowYPositions = FloatArray(modules.size)
+            // 每行的背景矩形（已吸附到整数像素），第二趟直接复用同一个矩形
+            val rowRects = ArrayList<FloatArray>(modules.size)
 
             modules.forEachIndexed { index, module ->
                 var yPos = (if (side.vertical == Vertical.DOWN) -textSpacer else textSpacer) *
@@ -422,62 +461,86 @@ class Arraylist(
                     module.yAnim = AnimationUtil.base(module.yAnim.toDouble(), yPos.toDouble(), 0.2).toFloat()
                     yPos = module.yAnim
                 }
+
+                // 动画本身保留小数推进，但落点取整：整行只在整像素上移动
+                yPos = snap(yPos)
                 rowYPositions[index] = yPos
                 val displayString = getDisplayString(module)
                 val width = font.getStringWidth(displayString)
+                val slide = snap(module.slide)
 
                 val xPos = when (side.horizontal) {
-                    Horizontal.RIGHT, Horizontal.MIDDLE -> -module.slide - if (displayIcons) 2 else 3
-                    Horizontal.LEFT -> -(width - module.slide) + if (rectMode == "Left") 6 else 3
+                    Horizontal.RIGHT, Horizontal.MIDDLE -> -slide - if (displayIcons) 2 else 3
+                    Horizontal.LEFT -> -(width - slide) + if (rectMode == "Left") 6 else 3
                 }
 
                 val moduleMinX = if (side.horizontal == Horizontal.RIGHT || side.horizontal == Horizontal.MIDDLE) {
                     xPos - if (rectMode == "Right") 5 else 2
                 } else {
-                    if (rectMode == "Left") 0f else xPos - 1
+                    // 与第二趟实际绘制的背景左边对齐（Left 模式多 1px）
+                    if (rectMode == "Left") 1f else 0f
                 }
                 val moduleMaxX = if (side.horizontal == Horizontal.RIGHT || side.horizontal == Horizontal.MIDDLE) {
                     if (rectMode == "Right") -3F else -1F
                 } else {
                     xPos + width + if (rectMode == "Right") 4 else 1
                 }
-                totalMinX = minOf(totalMinX, moduleMinX)
-                totalMaxX = maxOf(totalMaxX, moduleMaxX)
-                totalMinY = minOf(totalMinY, yPos + rectInset)
-                totalMaxY = maxOf(totalMaxY, yPos + textSpacer - rectInset)
 
-                shadowRects.add(floatArrayOf(moduleMinX, yPos + rectInset, moduleMaxX, yPos + textSpacer - rectInset))
+                // 吸附到整数像素：阴影、模糊遮罩、背景填充共用同一个矩形，避免半像素造成的 1px 透明缝
+                val rowLeft = snap(moduleMinX)
+                val rowRight = snap(moduleMaxX)
+                val rowTop = snap(yPos + rectInset)
+                val rowBottom = snap(yPos + textSpacer - rectInset)
+
+                totalMinX = minOf(totalMinX, rowLeft)
+                totalMaxX = maxOf(totalMaxX, rowRight)
+                totalMinY = minOf(totalMinY, rowTop)
+                totalMaxY = maxOf(totalMaxY, rowBottom)
+
+                val rowRect = floatArrayOf(rowLeft, rowTop, rowRight, rowBottom)
+                shadowRects.add(rowRect)
+                rowRects.add(rowRect)
             }
 
             // ---------- 整体阴影：整块只画一次，内部无接缝，不会上下污染 ----------
             if (shadowcheck && bgColors.color().alpha > 0 && shadowRects.isNotEmpty()) {
                 GlowUtils.drawCompositeGlow(
                     shadowRects,
-                    (shadowStrength * 13F).toInt(),
-                    shadowCheckColor,
+                    shadowRadius,
+                    shadowColorFor(false, textCustomColor),
                     mask = shadowMask
                 )
             }
 
-            // ---------- 逐条背景模糊：每行(小文字背景)各自模糊一次，不做整块模糊 ----------
+            // ---------- 背景模糊：整块只跑一次，再用模板遮罩把每行区域切出来 ----------
             if (BlurSettings.active && BlurSettings.arraylist && !globalBackground && modules.isNotEmpty()) {
                 val sr = ScaledResolution(mc)
                 val screenScale = sr.scaleFactor.toFloat()
                 val elementScale = this.scale
                 // HUD: glScalef(scale) 再 glTranslated(renderX, renderY) → 局部点 L 的屏幕位置是 (renderX + L) * scale
-                for (r in shadowRects) {
-                    val screenX = ((renderX + r[0]) * elementScale * screenScale).toFloat()
-                    val screenY = ((renderY + r[1]) * elementScale * screenScale).toFloat()
-                    val screenW = (r[2] - r[0]) * elementScale * screenScale
-                    val screenH = (r[3] - r[1]) * elementScale * screenScale
-                    BlurUtils.drawOffsetBlur(
-                        screenX, screenY, screenW, screenH,
-                        samples = BlurSettings.passes,
-                        strength = 0f,
-                        radius = roundedBackgroundRadius * elementScale * screenScale,
-                        liquidGlass = BlurSettings.arraylistLiquidGlass
+                val screenRects = shadowRects.map { r ->
+                    floatArrayOf(
+                        ((renderX + r[0]) * elementScale * screenScale).toFloat(),
+                        ((renderY + r[1]) * elementScale * screenScale).toFloat(),
+                        ((renderX + r[2]) * elementScale * screenScale).toFloat(),
+                        ((renderY + r[3]) * elementScale * screenScale).toFloat()
                     )
                 }
+
+                // 整块 = 所有行的并集：只模糊这一次，模板再把行与行之间的空隙切掉
+                val unionLeft = screenRects.minOf { it[0] }
+                val unionTop = screenRects.minOf { it[1] }
+                val unionRight = screenRects.maxOf { it[2] }
+                val unionBottom = screenRects.maxOf { it[3] }
+
+                BlurUtils.drawOffsetBlur(
+                    unionLeft, unionTop, unionRight - unionLeft, unionBottom - unionTop,
+                    samples = BlurSettings.passes,
+                    strength = 0f,
+                    radius = roundedBackgroundRadius * elementScale * screenScale,
+                    rects = screenRects,
+                    liquidGlass = BlurSettings.arraylistLiquidGlass
+                )
             }
 
             // ---------- 绘制全局背景（仅模糊与颜色） ----------
@@ -527,6 +590,13 @@ class Arraylist(
 
                 val markAsInactive = inactiveStyle == "Color" && !module.isActive
 
+                // 这一行文字实际用的颜色（阴影跟随文字时取它）
+                val rowTextRgb = when (textColorMode) {
+                    "Random" -> moduleColor
+                    "Fade" -> textFadeColor
+                    else -> textCustomColor
+                }
+
                 val displayString = getDisplayString(module)
                 val displayStringWidth = font.getStringWidth(displayString)
 
@@ -535,7 +605,7 @@ class Arraylist(
 
                 when (side.horizontal) {
                     Horizontal.RIGHT, Horizontal.MIDDLE -> {
-                        val xPos = -module.slide - if (displayIcons) 2 else 3
+                        val xPos = -snap(module.slide) - if (displayIcons) 2 else 3
 
                         if (glow && bgColors.color().alpha > 0) {
                             GlowUtils2.drawAcrylicBlur(
@@ -543,8 +613,8 @@ class Arraylist(
                                 yPos + rectInset,
                                 if (rectMode == "Right") (-3F - (xPos - 5)) else (-1F - (xPos - 2)),
                                 textSpacer - 2F * rectInset,
-                                (shadowStrength * 13F).toInt(),
-                                shadowCheckColor,
+                                shadowRadius,
+                                shadowColorFor(markAsInactive, rowTextRgb),
                                 1F
                             )
                         }
@@ -558,11 +628,12 @@ class Arraylist(
                             gradientOffset
                         ).use {
                             RainbowShader.begin(backgroundMode == "Rainbow", rainbowX, rainbowY, rainbowOffset).use {
+                                val rowRect = rowRects[index]
                                 drawRoundedRect(
-                                    xPos - if (rectMode == "Right") 5 else 2,
-                                    yPos + rectInset,
-                                    if (rectMode == "Right") -3F else -1F,
-                                    yPos + textSpacer - rectInset,
+                                    rowRect[0],
+                                    rowRect[1],
+                                    rowRect[2],
+                                    rowRect[3],
                                     when (backgroundMode) {
                                         "Gradient" -> 0
                                         "Rainbow" -> 0
@@ -577,12 +648,14 @@ class Arraylist(
                                         RenderUtils.RoundedCorners.LEFT_ONLY
                                     }
                                 )
+
+                                if (innerShadow) drawInnerShadow(rowRect)
                             }
                         }
 
                         if (textColorMode == "Gradient" && !markAsInactive) {
                             // 直接按字符计算渐变色（文字 + 发光都用真实颜色），不再依赖 shader
-                            drawGradientText(displayString, xPos + 1 - if (rectMode == "Right") 3 else 0, yPos + textY, textShadow)
+                            drawGradientText(displayString, xPos + 1 - if (rectMode == "Right") 3 else 0, yPos + textOffsetY, textShadow)
                         } else run {
                         if (textGlow) {
                             val glowTextColor = if (markAsInactive) inactiveColor else when (textColorMode) {
@@ -591,7 +664,7 @@ class Arraylist(
                                 "Fade" -> textFadeColor
                                 else -> textCustomColor
                             }
-                            drawTextGlow(displayString, xPos + 1 - if (rectMode == "Right") 3 else 0, yPos + textY, glowTextColor)
+                            drawTextGlow(displayString, xPos + 1 - if (rectMode == "Right") 3 else 0, yPos + textOffsetY, glowTextColor)
                         }
 
                         GradientFontShader.begin(
@@ -608,7 +681,7 @@ class Arraylist(
                                 font.drawString(
                                     displayString,
                                     xPos + 1 - if (rectMode == "Right") 3 else 0,
-                                    yPos + textY,
+                                    yPos + textOffsetY,
                                     if (markAsInactive) inactiveColor
                                     else when (textColorMode) {
                                         "Gradient" -> 0
@@ -713,7 +786,7 @@ class Arraylist(
 
                     Horizontal.LEFT -> {
                         val width = font.getStringWidth(displayString)
-                        val xPos = -(width - module.slide) + if (rectMode == "Left") 6 else 3
+                        val xPos = -(width - snap(module.slide)) + if (rectMode == "Left") 6 else 3
 
                         if (glow && bgColors.color().alpha > 0) {
                             GlowUtils2.drawAcrylicBlur(
@@ -721,8 +794,8 @@ class Arraylist(
                                 yPos + rectInset,
                                 if (rectMode == "Right") (-3F - (xPos - 5)) else (-1F - (xPos - 2)),
                                 textSpacer - 2F * rectInset,
-                                (shadowStrength * 13F).toInt(),
-                                shadowCheckColor,
+                                shadowRadius,
+                                shadowColorFor(markAsInactive, rowTextRgb),
                                 1F
                             )
                         }
@@ -736,11 +809,12 @@ class Arraylist(
                             gradientOffset
                         ).use {
                             RainbowShader.begin(backgroundMode == "Rainbow", rainbowX, rainbowY, rainbowOffset).use {
+                                val rowRect = rowRects[index]
                                 drawRoundedRect(
-                                    if (rectMode == "Left") 1f else 0f,
-                                    yPos + rectInset,
-                                    xPos + width + if (rectMode == "Right") 4 else 1,
-                                    yPos + textSpacer - rectInset,
+                                    rowRect[0],
+                                    rowRect[1],
+                                    rowRect[2],
+                                    rowRect[3],
                                     when (backgroundMode) {
                                         "Gradient" -> 0
                                         "Rainbow" -> 0
@@ -755,11 +829,13 @@ class Arraylist(
                                         RenderUtils.RoundedCorners.RIGHT_ONLY
                                     }
                                 )
+
+                                if (innerShadow) drawInnerShadow(rowRect)
                             }
                         }
 
                         if (textColorMode == "Gradient" && !markAsInactive) {
-                            drawGradientText(displayString, xPos - 1, yPos + textY, textShadow)
+                            drawGradientText(displayString, xPos - 1, yPos + textOffsetY, textShadow)
                         } else run {
                         if (textGlow) {
                             val glowTextColor = if (markAsInactive) inactiveColor else when (textColorMode) {
@@ -768,7 +844,7 @@ class Arraylist(
                                 "Fade" -> textFadeColor
                                 else -> textCustomColor
                             }
-                            drawTextGlow(displayString, xPos - 1, yPos + textY, glowTextColor)
+                            drawTextGlow(displayString, xPos - 1, yPos + textOffsetY, glowTextColor)
                         }
 
                         GradientFontShader.begin(
@@ -783,7 +859,7 @@ class Arraylist(
                                 !markAsInactive && textColorMode == "Rainbow", rainbowX, rainbowY, rainbowOffset
                             ).use {
                                 font.drawString(
-                                    displayString, xPos - 1, yPos + textY, if (markAsInactive) inactiveColor
+                                    displayString, xPos - 1, yPos + textOffsetY, if (markAsInactive) inactiveColor
                                     else when (textColorMode) {
                                         "Gradient" -> 0
                                         "Rainbow" -> 0
@@ -903,11 +979,13 @@ class Arraylist(
                 if (displayIcons) {
                     val width = font.getStringWidth(displayString)
 
-                    val side = if (side.horizontal == Side.Horizontal.LEFT) {
-                        (-width + module.slide) / 6 + if (rectMode == "Left") 3 else 0
-                    } else {
-                        -module.slide - 2 + width + if (rectMode == "Right") 0 else 2
-                    }
+                    val side = snap(
+                        if (side.horizontal == Side.Horizontal.LEFT) {
+                            (-width + module.slide) / 6 + if (rectMode == "Left") 3 else 0
+                        } else {
+                            -module.slide - 2 + width + if (rectMode == "Right") 0 else 2
+                        }
+                    )
 
                     val resource = module.category.iconResourceLocation
 

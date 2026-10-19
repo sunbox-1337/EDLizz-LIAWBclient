@@ -16,6 +16,7 @@ import net.minecraft.client.renderer.GlStateManager.bindTexture
 import net.minecraft.client.renderer.texture.TextureUtil
 import net.minecraftforge.fml.relauncher.Side
 import net.minecraftforge.fml.relauncher.SideOnly
+import org.lwjgl.BufferUtils
 import org.lwjgl.opengl.GL11.*
 import java.awt.Color
 import java.awt.Font
@@ -33,8 +34,14 @@ import kotlin.math.roundToInt
 class AWTFontRenderer(
     val font: Font,
     startChar: Int = 0,
-    stopChar: Int = 255,
-    private val loadingScreen: Boolean = false
+    private val stopChar: Int = 255,
+    private val loadingScreen: Boolean = false,
+    /**
+     * 是否启用动态字形（中文等图集外字符）。
+     * 只有中文字体才开：开启后会额外占一张 1024×1024 图集，
+     * 普通字体保持原来的小图集，不增加显存。
+     */
+    private val dynamicGlyphs: Boolean = false
 ) : MinecraftInstance {
 
     companion object : Listenable {
@@ -59,6 +66,14 @@ class AWTFontRenderer(
         private const val GC_TICKS = 600                    // Do GC every 600 frames
         private const val CACHED_FONT_REMOVAL_TIME = 30000L // 30s time-based eviction
         private const val MAX_CACHED_STRINGS = 255          // LRU cache size limit
+
+        /** 图集宽度：预烘焙 + 动态中文字形共用一张，固定宽度保证 UV 稳定 */
+        private const val ATLAS_SIZE = 2048
+
+        /** 动态字形预留的高度带（像素），用完就回退原版字体 */
+        private const val DYNAMIC_BAND = 512
+
+        private const val GLYPH_GAP = 1
 
         private var gcTicks = 0
 
@@ -96,6 +111,18 @@ class AWTFontRenderer(
     private val charLocations = arrayOfNulls<CharLocation>(stopChar)
 
     /**
+     * 预烘焙范围之外的字形（中文等）按需画进同一张图集的空闲区域。
+     * 图集固定 2048×2048，所以已有字符的 UV 不会因为新增字形而失效，
+     * 已经编译好的字符串 display list 也不用重建。
+     */
+    private val dynamicLocations = HashMap<Int, CharLocation>()
+
+    private var dynamicX = 0
+    private var dynamicY = 0
+    private var dynamicRowHeight = 0
+
+
+    /**
      * We store strings in an LRU-like map with time-based eviction:
      * - If the size exceeds [MAX_CACHED_STRINGS], we remove the eldest entry.
      * - If an entry hasn't been used for 30s, we remove it.
@@ -131,6 +158,9 @@ class AWTFontRenderer(
      * Draw [text] at ([x], [y]) with [color]. Scales by 0.25 => typical UI text size.
      */
     fun drawString(text: String, x: Double, y: Double, color: Int) {
+        // 图集外的字符（中文等）先补进图集，否则会掉回原版字体
+        ensureGlyphs(text)
+
         // Scale down => 0.25 => then everything is "2 * x" in real coords
         glPushMatrix()
         glScaled(0.25, 0.25, 0.25)
@@ -170,7 +200,7 @@ class AWTFontRenderer(
         var fallbackWidth = 0f // fallback for MC glyphs
 
         for (char in text) {
-            val loc = charLocations.getOrNull(char.code)
+            val loc = locate(char.code)
             if (loc == null) {
                 // Fallback => break quads, draw with MC font
                 glEnd()
@@ -226,7 +256,7 @@ class AWTFontRenderer(
         val fallbackScale = font.size / 32f
 
         for (char in text) {
-            val loc = charLocations.getOrNull(char.code)
+            val loc = locate(char.code) ?: ensureGlyph(char.code)
             if (loc == null) {
                 val w = mc.fontRendererObj.getCharWidth(char)
                 fallbackWidth += ((w + 8) * fallbackScale).coerceAtLeast(0f)
@@ -333,7 +363,30 @@ class AWTFontRenderer(
         }
 
         // Upload to GPU
-        textureID = TextureUtil.uploadTextureImageAllocate(TextureUtil.glGenTextures(), bigImage, true, true)
+        if (!dynamicGlyphs) {
+            textureID = TextureUtil.uploadTextureImageAllocate(TextureUtil.glGenTextures(), bigImage, true, true)
+            return
+        }
+
+        // 中文等动态字形：预烘焙字形放左上，下面留一条固定高度的空间按需填充
+        val atlasWidth = maxOf(textureWidth, ATLAS_SIZE)
+        val atlasHeight = textureHeight + DYNAMIC_BAND
+
+        val canvas = BufferedImage(atlasWidth, atlasHeight, BufferedImage.TYPE_INT_ARGB)
+        val canvasGraphics = canvas.createGraphics()
+        canvasGraphics.drawImage(bigImage, 0, 0, null)
+        canvasGraphics.dispose()
+
+        textureID = TextureUtil.uploadTextureImageAllocate(TextureUtil.glGenTextures(), canvas, true, true)
+
+        // 动态分配从预烘焙区域下方开始
+        dynamicY = textureHeight + GLYPH_GAP
+        dynamicX = 0
+        dynamicRowHeight = 0
+
+        // UV 分母改用图集尺寸；已有字形坐标不用动
+        textureWidth = atlasWidth
+        textureHeight = atlasHeight
     }
 
     /**
@@ -360,6 +413,92 @@ class AWTFontRenderer(
         g2d.color = Color.WHITE
         g2d.drawString(c.toString(), 3, 1 + fm.ascent)
         return charImg
+    }
+
+    /** 预烘焙图集或动态图集里的字形位置 */
+    private fun locate(charCode: Int): CharLocation? =
+        charLocations.getOrNull(charCode) ?: dynamicLocations[charCode]
+
+    /** 整串里只要有一个没烘焙的字符，就补一遍图集 */
+    private fun ensureGlyphs(text: String) {
+        if (!dynamicGlyphs) return
+
+        var missing = false
+        for (char in text) {
+            if (char.code >= stopChar && !dynamicLocations.containsKey(char.code)) {
+                missing = true
+                break
+            }
+        }
+        if (!missing) return
+
+        for (char in text) {
+            if (char.code >= stopChar) ensureGlyph(char.code)
+        }
+    }
+
+    /** 图集满了之后不再重试，避免每帧重复渲染失败的字形 */
+    private val failedGlyphs = HashSet<Int>()
+
+    /**
+     * 预烘焙范围外的字符（中文等）按需生成字形，写进图集空白区域。
+     * 图集满了返回 null，调用方回退到原版字体。
+     */
+    private fun ensureGlyph(charCode: Int): CharLocation? {
+        if (!dynamicGlyphs) return null
+
+        dynamicLocations[charCode]?.let { return it }
+        if (failedGlyphs.contains(charCode)) return null
+
+        val image = drawCharToImage(charCode.toChar())
+        val w = image.width
+        val h = image.height
+        if (w <= 0 || h <= 0) {
+            failedGlyphs += charCode
+            return null
+        }
+
+        if (dynamicX + w + GLYPH_GAP > textureWidth) {
+            dynamicX = 0
+            dynamicY += dynamicRowHeight + GLYPH_GAP
+            dynamicRowHeight = 0
+        }
+        if (dynamicY + h + GLYPH_GAP > textureHeight) {
+            failedGlyphs += charCode
+            return null
+        }
+
+        val location = CharLocation(dynamicX, dynamicY, w, h)
+        uploadSubImage(image, dynamicX, dynamicY)
+
+        dynamicLocations[charCode] = location
+        dynamicX += w + GLYPH_GAP
+        if (h > dynamicRowHeight) dynamicRowHeight = h
+
+        return location
+    }
+
+    /** 只把这一小块字形上传到图集的对应位置 */
+    private fun uploadSubImage(image: BufferedImage, x: Int, y: Int) {
+        val w = image.width
+        val h = image.height
+        val pixels = IntArray(w * h)
+        image.getRGB(0, 0, w, h, pixels, 0, w)
+
+        val buffer = BufferUtils.createByteBuffer(w * h * 4)
+        for (pixel in pixels) {
+            buffer.put((pixel shr 16).toByte())
+            buffer.put((pixel shr 8).toByte())
+            buffer.put(pixel.toByte())
+            buffer.put((pixel ushr 24).toByte())
+        }
+        buffer.flip()
+
+        val previous = glGetInteger(GL_TEXTURE_BINDING_2D)
+        glBindTexture(GL_TEXTURE_2D, textureID)
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buffer)
+        glBindTexture(GL_TEXTURE_2D, previous)
     }
 
     /**

@@ -14,6 +14,7 @@ import net.ccbluex.liquidbounce.ui.client.altmanager.GuiAltManager
 import net.ccbluex.liquidbounce.ui.client.fontmanager.GuiFontManager
 import net.ccbluex.liquidbounce.ui.font.Fonts
 import net.ccbluex.liquidbounce.utils.client.JavaVersion
+import net.ccbluex.liquidbounce.utils.client.PacketFix
 import net.ccbluex.liquidbounce.utils.client.javaVersion
 import net.ccbluex.liquidbounce.utils.io.MiscUtils
 import net.ccbluex.liquidbounce.utils.render.RenderUtils
@@ -74,6 +75,10 @@ class GuiMainMenu : AbstractScreen() {
         +GuiButton(1, baseCol1, defaultHeight, 98*2, 23, I18n.format("menu.singleplayer"))
         +GuiButton(2, baseCol1, defaultHeight + 26, 98*2, 23, I18n.format("menu.multiplayer"))
         +GuiButton(110, baseCol1, defaultHeight + 26 * 2, 98, 23, "Options")
+
+        // PacketFix 开关（右上角，状态跟随 ViaForge 目标版本）
+        val packetFixLabel = "PacketFix ${if (PacketFix.isEnabled()) "§aON" else "§cOFF"}§r §7(${PacketFix.targetVersionName()})"
+        +GuiButton(120, width - 112, 6, 106, 20, packetFixLabel)
     }
 
     private fun showWelcomePopup() {
@@ -192,6 +197,11 @@ class GuiMainMenu : AbstractScreen() {
             4 -> mc.shutdown()
             100 -> mc.displayGuiScreen(GuiAltManager(this))
             110 -> mc.displayGuiScreen(GuiOptions(this))
+            120 -> {
+                PacketFix.toggle()
+                button.displayString =
+                    "PacketFix ${if (PacketFix.isEnabled()) "§aON" else "§cOFF"}§r §7(${PacketFix.targetVersionName()})"
+            }
         }
     }
 

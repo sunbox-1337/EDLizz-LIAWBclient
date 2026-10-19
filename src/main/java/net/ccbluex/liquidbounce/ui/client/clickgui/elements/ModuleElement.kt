@@ -26,15 +26,39 @@ class ModuleElement(val module: Module) : ButtonElement(module.name, buttonActio
 
     var supposedWidth = 0
 
+    /**
+     * 新布局（Zenith 模式）里设置列宽度是固定的，所以这里强制 settingsWidth。
+     * <= 0 表示不启用，仍然走原来的内容自适应逻辑。
+     */
+    var forcedSettingsWidth = 0
+        private set
+
+    /** Zenith 模式下模块行由外部绘制，样式层只负责 settings 内容 */
+    var hideRow = false
+
+    /** 设置面板画在模块行「下方」（宽度对齐行宽），而不是右侧 —— 新布局的右列用 */
+    var settingsBelow = false
+
+    fun forceSettingsWidth(width: Int) {
+        forcedSettingsWidth = width.coerceAtLeast(0)
+        if (width <= 0 || settingsWidth == width) return
+
+        // 原来的 setter 只能变宽，这里借 disableFiltering 允许收缩一次
+        disableFiltering = true
+        settingsWidth = width
+    }
+
     var settingsWidth = 0
         set(value) {
-            if (value > settingsWidth || disableFiltering) {
+            val target = if (forcedSettingsWidth > 0) forcedSettingsWidth else value
+
+            if (target > settingsWidth || disableFiltering) {
                 disableFiltering = false
-                field = value
+                field = target
             }
 
-            if (value > supposedWidth) {
-                supposedWidth = value
+            if (target > supposedWidth) {
+                supposedWidth = target
             }
         }
 

@@ -80,7 +80,9 @@ data class Rotation(var yaw: Float, var pitch: Float) : MinecraftInstance {
         yaw = getFixedSensitivityAngle(yaw, serverRotation.yaw, gcd)
         pitch = getFixedSensitivityAngle(pitch, serverRotation.pitch, gcd)
 
-        return this.withLimitedPitch()
+        // 不再钳制 pitch 到 ±90：正常流程里 pitch 永远在范围内（setTargetRotation 已校验），
+        // 这里多出来的 clamp 只会杀掉 Unfair Pitch（pitch 93）这类非法俯仰。
+        return this
     }
 
     /**

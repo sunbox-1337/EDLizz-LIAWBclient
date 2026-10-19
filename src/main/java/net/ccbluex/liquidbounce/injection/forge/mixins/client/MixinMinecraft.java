@@ -93,8 +93,11 @@ public abstract class MixinMinecraft {
     @Shadow
     public GameSettings gameSettings;
 
-    @Shadow
-    public abstract void displayGuiScreen(GuiScreen guiScreenIn);
+    // NOTE: do NOT declare an unused @Shadow displayGuiScreen(GuiScreen) here.
+    // Mixin resolves shadow methods against the target class at apply time; an unused stub for a
+    // method that cannot be resolved in this runtime aborts the whole mixin application with
+    // "InvalidMixinException: @Shadow method displayGuiScreen ... was not located".
+    // The GUI hook below uses @Inject(method = "displayGuiScreen") instead, which resolves fine.
 
     @Unique
     private Future<?> liquidBounce$preloadFuture;

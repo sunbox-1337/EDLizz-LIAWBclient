@@ -162,9 +162,15 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
 
     // Rotation Options
     private val modeList =
-        choices("Rotations", arrayOf("Off", "Normal", "Stabilized", "ReverseYaw", "GodBridge", "Hypixel"), "Normal")
+        choices("Rotations", arrayOf("Off", "Normal", "Stabilized", "ReverseYaw", "GodBridge", "Hypixel", "UnfairPitch"), "Normal")
     private val hypixelMinPitch by float("HypixelMinPitch", 55f, 50f..90f) { modeList.get() == "Hypixel" }
     private val hypixelMaxPitch by float("HypixelMaxPitch", 75f, 50f..90f) { modeList.get() == "Hypixel" }
+    // Unfair Pitch（MoonLight 非法超大俯仰）：yaw 保持玩家朝向，pitch 越过 90°「超低头」，
+    // 视线越过竖直向下往后偏 —— 不回头就能放身后/脚下的方块
+    private val unfairPitch by float("UnfairPitch", 93f, 90.5f..135f) { modeList.get() == "UnfairPitch" }
+    // Telly 不回头：跳过水平贴墙放置（原版 Telly 会侧头/回头接方块），
+    // 改用超低头（pitch 93）直接把方块放到脚下/身后
+    private val tellyUnfairPitch by boolean("TellyUnfairPitch", false) { scaffoldMode == "Telly" }
     private val options = RotationSettingsWithRotationModes(this, modeList).apply {
         strictValue.excludeWithState()
         resetTicksValue.setSupport { it && scaffoldMode != "Telly" }
@@ -289,7 +295,11 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
     private var horizontalPlacements = horizontalPlacementsRange.random()
     private var verticalPlacements = verticalPlacementsRange.random()
     private val shouldPlaceHorizontally
-        get() = scaffoldMode == "Telly" && mc.thePlayer.isMoving && (startHorizontally && blocksUntilAxisChange <= horizontalPlacements || !startHorizontally && blocksUntilAxisChange > verticalPlacements)
+        get() = scaffoldMode == "Telly" && !tellyUnfairPitch && mc.thePlayer.isMoving && (startHorizontally && blocksUntilAxisChange <= horizontalPlacements || !startHorizontally && blocksUntilAxisChange > verticalPlacements)
+
+    /** Unfair Pitch 生效条件：旋转模式选了 UnfairPitch，或 Telly 开了不回头（超低头放置）。 */
+    private val useUnfairPitchRotation
+        get() = options.rotationsActive && (modeList.get() == "UnfairPitch" || scaffoldMode == "Telly" && tellyUnfairPitch)
 
     // Shared state for StraightEdgeSneak & SDShiftBridge
     private var shiftBridgeSneaking = false
@@ -482,6 +492,15 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
         val rotation = RotationUtils.currentRotation
         update()
 
+        // 残留非法旋转清理：刚从 UnfairPitch/超低头切回普通模式时，currentRotation
+        // 可能还停在 pitch>90 的非法角度并继续发包。这里强制拉回玩家视角。
+        if (!useUnfairPitchRotation && rotation != null && (rotation.pitch > 90f || rotation.pitch < -90f)) {
+            setTargetRotation(
+                Rotation(player.rotationYaw, player.rotationPitch),
+                options, 1, allowIllegalPitch = true
+            )
+        }
+
         val ticks = if (options.keepRotation) {
             if (scaffoldMode == "Telly") 1 else options.resetTicks
         } else {
@@ -515,11 +534,27 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
             return@handler
         }
 
+        // UnfairPitch：每 tick 用最新搜索出的旋转（yaw+pitch 都对准寻路目标，
+        // pitch 可能是非法超低头），保证转头实时跟随
+        if (useUnfairPitchRotation && options.rotationsActive) {
+            // yaw 永远锁玩家面朝前方（不回头），pitch 用最新搜索出的非法低头值
+            val fresh = this.placeRotation?.rotation?.let {
+                if (it.pitch > 90) Rotation(mc.thePlayer.rotationYaw, it.pitch) else null
+            } ?: Rotation(mc.thePlayer.rotationYaw, unfairPitch)
+            setRotation(fresh.fixedSensitivity(), ticks)
+            return@handler
+        }
+
         if (options.rotationsActive && rotation != null) {
             val placeRotation = this.placeRotation?.rotation ?: rotation
             if (RotationUtils.resetTicks != 0 || options.keepRotation) {
                 setRotation(placeRotation, ticks)
             }
+        } else if (options.rotationsActive && rotation == null) {
+            // 旋转被重置后（resetRotation 置 currentRotation=null）原逻辑会永远不再重新
+            // setRotation → currentRotation 停在玩家真实视角 → 射线打不到脚下 → 搭路永久失效。
+            // 这里兜底：只要有目标就重新拉起旋转。
+            this.placeRotation?.let { setRotation(it.rotation, ticks) }
         }
     }
 
@@ -668,7 +703,8 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
         if (scaffoldMode == "Telly" && player.isMoving) {
             if (player.airTicks < ticksUntilRotation.random() && ticksUntilJump >= jumpTicks) return
         }
-        setTargetRotation(rotation, options, ticks)
+        // Unfair Pitch 需要 pitch > 90 的非法值，放行校验
+        setTargetRotation(rotation, options, ticks, allowIllegalPitch = useUnfairPitchRotation)
     }
 
     private fun findBlock(expand: Boolean, area: Boolean) {
@@ -947,11 +983,28 @@ object Scaffold : Module("Scaffold", Category.WORLD, Keyboard.KEY_G) {
         var rotation = toRotation(vec, false)
         val roundYaw90 = round(rotation.yaw / 90f) * 90f
         val roundYaw45 = round(rotation.yaw / 45f) * 45f
-        rotation = when (options.rotationMode) {
+        rotation = (if (useUnfairPitchRotation) {
+            // 不回头：yaw 永远锁定玩家面朝的前方（实时跟随，绝不转向目标/反向），
+            // pitch 从 90.5° 步进探到 UnfairPitch 上限——超低头的射线朝面朝方向
+            // 的反方向弯折，正好够到脚后跟/身后的支撑方块。搜索失败也保持
+            // 前方 yaw，只抬高 pitch，绝不会回头。
+            var aimed: Rotation? = null
+            var p = 90.5f
+            while (p <= unfairPitch) {
+                val candidate = Rotation(mc.thePlayer.rotationYaw, p).fixedSensitivity()
+                val rt = performBlockRaytrace(candidate, maxReach)
+                if (rt != null && rt.blockPos == offsetPos && (!raycast || rt.sideHit == side.opposite)) {
+                    aimed = candidate
+                    break
+                }
+                p += 0.5f
+            }
+            aimed ?: Rotation(mc.thePlayer.rotationYaw, unfairPitch).fixedSensitivity()
+        } else when (options.rotationMode) {
             "Stabilized" -> Rotation(roundYaw45, rotation.pitch)
             "ReverseYaw" -> Rotation(if (!isLookingDiagonally) roundYaw90 else roundYaw45, rotation.pitch)
             else -> rotation
-        }.fixedSensitivity()
+        }).fixedSensitivity()
 
         performBlockRaytrace(currRotation, maxReach)?.let { raytrace ->
             if (raytrace.blockPos == offsetPos && (!raycast || raytrace.sideHit == side.opposite)) {

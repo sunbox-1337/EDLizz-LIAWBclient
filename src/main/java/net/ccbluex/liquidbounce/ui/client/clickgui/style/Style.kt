@@ -27,6 +27,13 @@ import kotlin.math.max
 abstract class Style : MinecraftInstance {
     val rgbaLabels = listOf("R:", "G:", "B:", "A:")
 
+    /**
+     * 打开 / 关闭时是否播放「弹出（弹性过冲）」动画。
+     * 默认关：经典风格保持原来的瞬开瞬关，只有明确要这个效果的新风格才打开。
+     */
+    open val wantsPopAnimation: Boolean
+        get() = false
+
     protected var sliderValueHeld: Value<*>? = null
         get() {
             if (!Mouse.isButtonDown(0)) field = null

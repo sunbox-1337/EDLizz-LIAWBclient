@@ -160,20 +160,40 @@ object Downloader {
             } tasks for downloading $url to $targetFile"
         )
 
-        val tempFiles = List(maxConcurrency) { chunkIndex ->
-            async {
-                semaphore.withPermit {
-                    val start = chunkIndex * chunkSize
-                    val end = minOf((chunkIndex + 1) * chunkSize - 1, fileSize - 1)
-                    val tempFile = File(targetFile.parent, "chunk_$chunkIndex.tmp")
+        val tempFiles = try {
+            List(maxConcurrency) { chunkIndex ->
+                async {
+                    semaphore.withPermit {
+                        val start = chunkIndex * chunkSize
+                        val end = minOf((chunkIndex + 1) * chunkSize - 1, fileSize - 1)
+                        val tempFile = File(targetFile.parent, "chunk_$chunkIndex.tmp")
 
-                    downloadChunk(url, start, end, tempFile)
-                    tempFile
+                        downloadChunk(url, start, end, tempFile)
+                        tempFile
+                    }
                 }
-            }
-        }.awaitAll()
+            }.awaitAll()
+        } catch (t: Throwable) {
+            // Never leave chunk leftovers behind, they would be picked up as a partial download next time
+            cleanupChunks(targetFile.parentFile)
+            throw t
+        }
 
         mergeChunks(tempFiles, targetFile)
+    }
+
+    /**
+     * Deletes leftover chunk temp files of a previously failed/interrupted download.
+     */
+    fun cleanupChunks(parent: File?) {
+        if (parent == null || !parent.exists()) return
+
+        try {
+            parent.listFiles { file -> file.isFile && file.name.startsWith("chunk_") && file.name.endsWith(".tmp") }
+                ?.forEach { it.delete() }
+        } catch (t: Throwable) {
+            ClientUtils.LOGGER.warn("[HTTP] Failed to clean up chunk temp files in $parent", t)
+        }
     }
 
     private fun getFileSizeAndRangeSupport(url: String): Pair<Long, Boolean> =

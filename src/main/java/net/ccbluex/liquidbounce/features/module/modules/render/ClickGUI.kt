@@ -7,6 +7,7 @@ import net.ccbluex.liquidbounce.features.module.Category
 import net.ccbluex.liquidbounce.features.module.Module
 import net.ccbluex.liquidbounce.ui.client.clickgui.ClickGui
 import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.BlackStyle
+import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.FatalityStyle
 import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.LiquidBounceStyle
 import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.NullStyle
 import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.SlowlyStyle
@@ -15,9 +16,16 @@ import org.lwjgl.input.Keyboard
 import java.awt.Color
 
 object ClickGUI : Module("ClickGUI", Category.RENDER, Keyboard.KEY_RSHIFT, canBeEnabled = false) {
+    /**
+     * 布局模式：
+     * - Classic：原来的一列列独立面板
+     * - Zenith ：单窗口 + 左侧分类栏 + 中间模块列表 + 右侧设置列（外观仍是 LB 风格）
+     */
+    val layout by choices("Layout", arrayOf("Classic", "Zenith"), "Classic")
+
     private val style by choices(
         "Style",
-        arrayOf("LiquidBounce", "Null", "Slowly", "Black"),
+        arrayOf("LiquidBounce", "Fatality", "Null", "Slowly", "Black"),
         "LiquidBounce"
     ).onChanged {
         updateStyle()
@@ -68,6 +76,15 @@ object ClickGUI : Module("ClickGUI", Category.RENDER, Keyboard.KEY_RSHIFT, canBe
 
     override fun onEnable() {
         updateStyle()
+
+        // 布局模式：同一个 GuiScreen，切的是内部三列排布 / 原版面板列
+        clickGui.mode = if (layout == "Zenith") ClickGui.Mode.ZENITH else ClickGui.Mode.CLASSIC
+
+        // Zenith 的设置列依赖 LiquidBounceStyle 的 settingsBelow 渲染
+        if (layout == "Zenith") {
+            clickGui.style = LiquidBounceStyle
+        }
+
         mc.displayGuiScreen(clickGui)
         Keyboard.enableRepeatEvents(true)
     }
@@ -75,6 +92,7 @@ object ClickGUI : Module("ClickGUI", Category.RENDER, Keyboard.KEY_RSHIFT, canBe
     private fun updateStyle() {
         clickGui.style = when (style) {
             "LiquidBounce" -> LiquidBounceStyle
+            "Fatality" -> FatalityStyle
             "Null" -> NullStyle
             "Slowly" -> SlowlyStyle
             "Black" -> BlackStyle

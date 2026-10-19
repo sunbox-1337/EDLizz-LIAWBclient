@@ -111,8 +111,16 @@ object LocalSettingsCommand : Command("localsettings", "localsetting", "localcon
                 chat("§9Saving settings...")
                 settingsFile.writeText(settingsScript)
 
+                val written = settingsScript.lineSequence().count { it.isNotBlank() }
+                val covered = settingsScript.lineSequence()
+                    .mapNotNull { it.split(' ').firstOrNull() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .count()
+
                 chat("§6Settings saved successfully.")
-                addNotification(Notification.informative("Local Settings Command", "Saved Settings"))
+                chat("§7Wrote §a$written§7 lines covering §a$covered§7 modules -> §8${settingsFile.name}§7")
+                addNotification(Notification.informative("Local Settings Command", "Saved $written lines ($covered modules)"))
                 playEdit()
             } catch (throwable: Throwable) {
                 chat("§cFailed to create local config: §3${throwable.message}")

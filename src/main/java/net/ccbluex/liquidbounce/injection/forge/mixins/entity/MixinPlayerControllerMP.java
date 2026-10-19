@@ -9,6 +9,7 @@ import net.ccbluex.liquidbounce.event.AttackEvent;
 import net.ccbluex.liquidbounce.event.ClickWindowEvent;
 import net.ccbluex.liquidbounce.event.ClientSlotChangeEvent;
 import net.ccbluex.liquidbounce.event.EventManager;
+import net.ccbluex.liquidbounce.event.PreAttackEvent;
 import net.ccbluex.liquidbounce.features.module.modules.exploit.AbortBreaking;
 import net.ccbluex.liquidbounce.utils.attack.CooldownHelper;
 import net.ccbluex.liquidbounce.utils.inventory.SilentHotbar;
@@ -35,6 +36,11 @@ public class MixinPlayerControllerMP {
     private void attackEntity(EntityPlayer entityPlayer, Entity targetEntity, CallbackInfo callbackInfo) {
         EventManager.INSTANCE.call(new AttackEvent(targetEntity));
         CooldownHelper.INSTANCE.resetLastAttackedTicks();
+    }
+
+    @Inject(method = "attackEntity", at = @At("HEAD"))
+    private void preAttackEntity(EntityPlayer entityPlayer, Entity targetEntity, CallbackInfo callbackInfo) {
+        EventManager.INSTANCE.call(new PreAttackEvent(targetEntity));
     }
 
     @Inject(method = "getIsHittingBlock", at = @At("HEAD"), cancellable = true)

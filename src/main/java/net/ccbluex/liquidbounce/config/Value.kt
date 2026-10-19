@@ -127,14 +127,22 @@ sealed class Value<T>(
     protected abstract fun fromTextF(text: String): T?
 
     fun fromJson(element: JsonElement) {
-        val result = fromJsonF(element) ?: return
+        val result = runCatching { fromJsonF(element) }.getOrNull()
+        if (result == null) {
+            LOGGER.warn("[ValueSystem] Failed to parse JSON for value '$name' (owner=${owner?.name}): $element")
+            return
+        }
         changeValue(result)
 
         onChangedListeners.forEach { it.invoke(result) }
     }
 
     fun fromText(text: String) {
-        val result = fromTextF(text) ?: return
+        val result = runCatching { fromTextF(text) }.getOrNull()
+        if (result == null) {
+            LOGGER.warn("[ValueSystem] Failed to parse text for value '$name' (owner=${owner?.name}): '$text'")
+            return
+        }
         changeValue(result)
 
         onChangedListeners.forEach { it.invoke(result) }

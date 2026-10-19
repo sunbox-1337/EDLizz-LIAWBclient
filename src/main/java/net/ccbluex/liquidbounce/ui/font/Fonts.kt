@@ -85,6 +85,10 @@ object Fonts : MinecraftInstance {
     lateinit var fontRise35: GameFontRenderer
     lateinit var fontTenacity30: GameFontRenderer
 
+    /** 微软雅黑（中文），从系统字体目录提取 */
+    var fontYaHei35: GameFontRenderer? = null
+        private set
+
 
     private fun <T : FontRenderer> register(fontInfo: FontInfo, fontRenderer: T): T {
         FONT_REGISTRY[fontInfo] = fontRenderer
@@ -220,9 +224,56 @@ object Fonts : MinecraftInstance {
                 getFontFromFile2("Rise.ttf", 35).asGameFontRenderer()
             )
 
+            loadChineseFont()
+
             loadCustomFonts()
         }
         LOGGER.info("Loaded ${FONT_REGISTRY.size} fonts in ${time}ms")
+    }
+
+    /**
+     * 提取系统里的微软雅黑，注册成可选字体（会出现在所有 font 设置里）。
+     * 找不到就依次退到雅黑粗体 / 黑体 / 等线。
+     */
+    private fun loadChineseFont() {
+        val fontFile = prepareChineseFontFile() ?: run {
+            LOGGER.warn("No Chinese system font found, skipping Chinese font")
+            return
+        }
+
+        val awtFont = try {
+            fontFile.inputStream().use { input ->
+                Font.createFont(Font.TRUETYPE_FONT, input).deriveFont(Font.PLAIN, 35f)
+            }
+        } catch (e: Exception) {
+            LOGGER.warn("Failed to load Chinese font ${fontFile.name}", e)
+            return
+        }
+
+        fontYaHei35 = register(FontInfo("Microsoft YaHei", 35), awtFont.asGameFontRenderer(dynamicGlyphs = true))
+        LOGGER.info("Loaded Chinese font: ${awtFont.fontName} (${fontFile.name})")
+    }
+
+    private fun prepareChineseFontFile(): File? {
+        val target = File(fontsDir, "MicrosoftYaHei.ttc")
+        if (target.isFile && target.length() > 0) return target
+
+        val candidates = listOf(
+            File("C:/Windows/Fonts/msyh.ttc"),
+            File("C:/Windows/Fonts/msyhbd.ttc"),
+            File("C:/Windows/Fonts/simhei.ttf"),
+            File("C:/Windows/Fonts/Deng.ttf")
+        )
+        val source = candidates.firstOrNull { it.isFile } ?: return null
+
+        return runCatching {
+            fontsDir.mkdirs()
+            source.copyTo(target, overwrite = true)
+            target
+        }.getOrElse {
+            LOGGER.warn("Failed to copy Chinese font, using source directly", it)
+            source
+        }
     }
 
     private fun loadCustomFonts() {
@@ -247,9 +298,19 @@ object Fonts : MinecraftInstance {
                         LOGGER.info("Successfully copied local fonts")
                     }
                 } ?: throw IOException("Local font resource not found")
+            }.onFailure {
+                LOGGER.warn("Failed to obtain fonts archive, skipping extraction", it)
             }
-            LOGGER.info("Extracting fonts...")
-            outputFile.extractZipTo(fontsDir)
+            // best-effort: 只有 zip 真的存在且非空才解压；失败不阻断启动
+            // （后续 getFontFromFile2 会直接从内置资源加载字体，解压产物只是缓存）
+            if (outputFile.isFile && outputFile.length() > 0) {
+                LOGGER.info("Extracting fonts...")
+                runCatching { outputFile.extractZipTo(fontsDir) }
+                    .onFailure { LOGGER.warn("Failed to extract fonts, continuing anyway", it) }
+            } else {
+                outputFile.delete()
+                LOGGER.warn("fonts archive unavailable (${outputFile.absolutePath}), skipping extraction")
+            }
         }
     }
 
@@ -309,8 +370,8 @@ object Fonts : MinecraftInstance {
     private fun getFontFromFile2(file: String, size: Int): Font =
         getFontFromFileOrNull2(file, size)?: Font("default", Font.PLAIN, size)
 
-    private fun Font.asGameFontRenderer(): GameFontRenderer {
-        return GameFontRenderer(this@asGameFontRenderer)
+    private fun Font.asGameFontRenderer(dynamicGlyphs: Boolean = false): GameFontRenderer {
+        return GameFontRenderer(this@asGameFontRenderer, dynamicGlyphs)
     }
     fun getFont(fontName: String, size: Int) =
         try {

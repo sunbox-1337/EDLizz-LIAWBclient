@@ -10,6 +10,7 @@ import net.ccbluex.liquidbounce.features.module.modules.combat.FastBow
 import net.ccbluex.liquidbounce.features.module.modules.misc.NoRotateSet
 import net.ccbluex.liquidbounce.features.module.modules.render.Rotations
 import net.ccbluex.liquidbounce.utils.block.block
+import net.ccbluex.liquidbounce.utils.client.ClientUtils
 import net.ccbluex.liquidbounce.utils.client.MinecraftInstance
 import net.ccbluex.liquidbounce.utils.client.chat
 import net.ccbluex.liquidbounce.utils.client.rotation
@@ -544,9 +545,16 @@ object RotationUtils : MinecraftInstance, Listenable {
      * Set your target rotation
      *
      * @param rotation your target rotation
+     * @param allowIllegalPitch 允许 |pitch| > 90 的「非法俯仰」
+     *        （Scaffold Unfair Pitch / Telly 超低头需要 pitch 93 之类的值）
      */
-    fun setTargetRotation(rotation: Rotation, options: RotationSettings, ticks: Int = options.resetTicks) {
-        if (rotation.yaw.isNaN() || rotation.pitch.isNaN() || rotation.pitch > 90 || rotation.pitch < -90) {
+    fun setTargetRotation(
+        rotation: Rotation, options: RotationSettings, ticks: Int = options.resetTicks,
+        allowIllegalPitch: Boolean = false
+    ) {
+        if (rotation.yaw.isNaN() || rotation.pitch.isNaN() ||
+            (!allowIllegalPitch && (rotation.pitch > 90 || rotation.pitch < -90))
+        ) {
             return
         }
 
@@ -712,6 +720,10 @@ object RotationUtils : MinecraftInstance, Listenable {
     /**
      * Handle rotation update
      */
+    // ---- 卡死看门狗状态 ----
+    private var watchdogLastRotation: Rotation? = null
+    private var watchdogLastChangeTick = 0
+
     val onRotationUpdate = handler<RotationUpdateEvent>(priority = -1) {
         activeSettings?.let {
             // Was the rotation update immediate? Allow updates the next tick.
@@ -720,6 +732,25 @@ object RotationUtils : MinecraftInstance, Listenable {
                 return@handler
             }
         }
+
+        // ---- 卡死看门狗 ----
+        // 症状：serverOpenContainer/serverOpenInventory 这类全局状态卡死（或其它原因）导致
+        // update() 不再推进，currentRotation（发包角度）永久冻结在某一角度，
+        // 且 activeSettings 残留会把后续模块的旋转请求全部拒掉。
+        // currentRotation 连续 100 tick（5 秒）一个角度不变 → 强制 resetRotation 回玩家视角。
+        // 正常流程里要么每 tick 在动（朝目标/朝玩家视角收敛），要么早已 reset 归 null，不会触发。
+        currentRotation?.let { curr ->
+            val now = ClientUtils.runTimeTicks
+            val prev = watchdogLastRotation
+            if (prev == null || prev.yaw != curr.yaw || prev.pitch != curr.pitch) {
+                watchdogLastRotation = Rotation(curr.yaw, curr.pitch)
+                watchdogLastChangeTick = now
+            } else if (now - watchdogLastChangeTick > 100) {
+                resetRotation()
+                watchdogLastRotation = null
+                return@handler
+            }
+        } ?: run { watchdogLastRotation = null }
 
         update()
     }
